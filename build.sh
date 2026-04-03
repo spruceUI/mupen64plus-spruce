@@ -73,6 +73,7 @@ cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DMUPENPLUSAPI=ON \
     -DEGL=ON \
+    -DUSE_SYSTEM_LIBS=ON \
     -DCMAKE_C_FLAGS="${OPTFLAGS}" \
     -DCMAKE_CXX_FLAGS="${OPTFLAGS}"
 make -j$(nproc)
