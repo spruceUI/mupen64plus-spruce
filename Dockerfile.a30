@@ -13,6 +13,7 @@ RUN apt-get update && \
     python3 \
     wget \
     nasm \
+    ccache \
     && rm -rf /var/lib/apt/lists/*
 
 # Install A30 buildroot toolchain

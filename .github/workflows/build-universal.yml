@@ -34,15 +34,24 @@ jobs:
               --notes "Mupen64Plus binaries built from ${{ github.ref_name }}" \
             || true
 
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: ccache-aarch64
+          key: ccache-aarch64-${{ github.sha }}
+          restore-keys: ccache-aarch64-
+
       - name: Build Docker image
         run: docker build -t m64p-builder .
 
       - name: Build Mupen64Plus
         run: |
-          mkdir -p output
+          mkdir -p output ccache-aarch64
           docker run --rm \
             -e MUPEN_VERSION=${{ github.event.inputs.mupen_version || 'master' }} \
+            -e CCACHE_DIR=/ccache \
             -v ${{ github.workspace }}/output:/output \
+            -v ${{ github.workspace }}/ccache-aarch64:/ccache \
             m64p-builder
 
       - name: Upload binaries

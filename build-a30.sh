@@ -20,6 +20,14 @@ export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
 export OPTFLAGS="-Ofast -ffunction-sections -fdata-sections -fomit-frame-pointer -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -flto=auto"
 export LDFLAGS="-Wl,--gc-sections --sysroot=$SYSROOT -L$SYSROOT/usr/lib -static-libstdc++ -flto=auto"
 
+# ccache setup
+export CCACHE_DIR="${CCACHE_DIR:-/ccache}"
+export PATH="/usr/lib/ccache:$PATH"
+ln -sf /usr/bin/ccache /usr/local/bin/${CROSS}-gcc
+ln -sf /usr/bin/ccache /usr/local/bin/${CROSS}-g++
+ccache --max-size=500M
+ccache --zero-stats
+
 APIDIR=/build/core/src/api
 export SDL_CFLAGS="-I${SYSROOT}/usr/include/SDL2 -D_REENTRANT"
 export SDL_LDLIBS="-lSDL2"
@@ -121,6 +129,9 @@ cp core/data/* "$OUTPUT_DIR/data/"
 cp video-rice/data/* "$OUTPUT_DIR/data/"
 cp video-glide64mk2/data/* "$OUTPUT_DIR/data/"
 cp video-gliden64/ini/* "$OUTPUT_DIR/data/" 2>/dev/null || true
+
+echo "=== ccache stats ==="
+ccache --show-stats
 
 echo "=== Build complete ==="
 ls -la "$OUTPUT_DIR/"

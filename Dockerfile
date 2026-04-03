@@ -18,6 +18,7 @@ RUN dpkg --add-architecture arm64 && \
     ca-certificates \
     python3 \
     nasm \
+    ccache \
     libsdl2-dev:arm64 \
     libasound2-dev:arm64 \
     libfreetype6-dev:arm64 \
