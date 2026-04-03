@@ -17,9 +17,12 @@ export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig"
 export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig"
 export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
 
-OPTFLAGS="-O3 -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -flto=auto"
+export OPTFLAGS="-O3 -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -flto=auto"
 export LDFLAGS="--sysroot=$SYSROOT -L$SYSROOT/usr/lib -static-libstdc++"
-MAKE_OPTS="CROSS_COMPILE=${CROSS}- USE_GLES=1 OPTFLAGS=\"${OPTFLAGS}\" PREFIX=\"\" -j$(nproc)"
+
+m64p_make() {
+    make -C "$1" CROSS_COMPILE=${CROSS}- USE_GLES=1 OPTFLAGS="$OPTFLAGS" PREFIX="" -j$(nproc) all
+}
 
 echo "=== Building Mupen64Plus for A30 (armhf) ==="
 
@@ -50,15 +53,15 @@ done
 
 # Build core
 echo "=== Building core ==="
-make -C core/projects/unix $MAKE_OPTS all
+m64p_make core/projects/unix
 
 # Build plugins
 echo "=== Building plugins ==="
-make -C audio-sdl/projects/unix  $MAKE_OPTS all
-make -C input-sdl/projects/unix  $MAKE_OPTS all
-make -C rsp-hle/projects/unix    $MAKE_OPTS all
-make -C video-rice/projects/unix $MAKE_OPTS all
-make -C video-glide64mk2/projects/unix $MAKE_OPTS all
+m64p_make audio-sdl/projects/unix
+m64p_make input-sdl/projects/unix
+m64p_make rsp-hle/projects/unix
+m64p_make video-rice/projects/unix
+m64p_make video-glide64mk2/projects/unix
 
 # Build GLideN64 (cmake-based)
 echo "=== Building GLideN64 ==="
@@ -81,7 +84,7 @@ cd /build
 
 # Build frontend
 echo "=== Building frontend ==="
-make -C ui-console/projects/unix $MAKE_OPTS all
+m64p_make ui-console/projects/unix
 
 # Collect output
 echo "=== Collecting output ==="

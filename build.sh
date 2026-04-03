@@ -12,8 +12,11 @@ export STRIP=${CROSS}-strip
 export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig
 
-OPTFLAGS="-O3 -flto=auto"
-MAKE_OPTS="CROSS_COMPILE=${CROSS}- USE_GLES=1 OPTFLAGS=\"${OPTFLAGS}\" PREFIX=\"\" -j$(nproc)"
+export OPTFLAGS="-O3 -flto=auto"
+
+m64p_make() {
+    make -C "$1" CROSS_COMPILE=${CROSS}- USE_GLES=1 OPTFLAGS="$OPTFLAGS" PREFIX="" -j$(nproc) all
+}
 
 echo "=== Building Mupen64Plus for aarch64 ==="
 
@@ -42,15 +45,15 @@ done
 
 # Build core
 echo "=== Building core ==="
-make -C core/projects/unix $MAKE_OPTS all
+m64p_make core/projects/unix
 
 # Build plugins
 echo "=== Building plugins ==="
-make -C audio-sdl/projects/unix  $MAKE_OPTS all
-make -C input-sdl/projects/unix  $MAKE_OPTS all
-make -C rsp-hle/projects/unix    $MAKE_OPTS all
-make -C video-rice/projects/unix $MAKE_OPTS all
-make -C video-glide64mk2/projects/unix $MAKE_OPTS all
+m64p_make audio-sdl/projects/unix
+m64p_make input-sdl/projects/unix
+m64p_make rsp-hle/projects/unix
+m64p_make video-rice/projects/unix
+m64p_make video-glide64mk2/projects/unix
 
 # Build GLideN64 (cmake-based)
 echo "=== Building GLideN64 ==="
@@ -71,7 +74,7 @@ cd /build
 
 # Build frontend
 echo "=== Building frontend ==="
-make -C ui-console/projects/unix $MAKE_OPTS all
+m64p_make ui-console/projects/unix
 
 # Collect output
 echo "=== Collecting output ==="
