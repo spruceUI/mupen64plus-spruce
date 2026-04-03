@@ -12,7 +12,8 @@ export STRIP=${CROSS}-strip
 export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig
 
-export OPTFLAGS="-O3 -flto=auto"
+export OPTFLAGS="-O3 -ffunction-sections -fdata-sections -flto=auto"
+export LDFLAGS="-Wl,--gc-sections -flto=auto"
 
 APIDIR=/build/core/src/api
 export SDL_CFLAGS="$(pkg-config --cflags sdl2)"
@@ -75,7 +76,9 @@ cmake .. \
     -DEGL=ON \
     -DUSE_SYSTEM_LIBS=ON \
     -DCMAKE_C_FLAGS="${OPTFLAGS}" \
-    -DCMAKE_CXX_FLAGS="${OPTFLAGS}"
+    -DCMAKE_CXX_FLAGS="${OPTFLAGS}" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
+    -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}"
 make -j$(nproc)
 cd /build
 
@@ -89,11 +92,11 @@ mkdir -p "$OUTPUT_DIR"
 
 # Frontend binary
 cp ui-console/projects/unix/mupen64plus "$OUTPUT_DIR/"
-${STRIP} "$OUTPUT_DIR/mupen64plus"
+${STRIP} -s "$OUTPUT_DIR/mupen64plus"
 
 # Core library
 cp core/projects/unix/libmupen64plus.so.2.0.0 "$OUTPUT_DIR/libmupen64plus.so.2"
-${STRIP} "$OUTPUT_DIR/libmupen64plus.so.2"
+${STRIP} -s "$OUTPUT_DIR/libmupen64plus.so.2"
 
 # Plugins
 cp audio-sdl/projects/unix/mupen64plus-audio-sdl.so "$OUTPUT_DIR/"
@@ -103,7 +106,7 @@ cp video-rice/projects/unix/mupen64plus-video-rice.so "$OUTPUT_DIR/"
 cp video-glide64mk2/projects/unix/mupen64plus-video-glide64mk2.so "$OUTPUT_DIR/"
 cp video-gliden64/src/build/plugin/Release/mupen64plus-video-GLideN64.so "$OUTPUT_DIR/"
 for so in "$OUTPUT_DIR"/mupen64plus-*.so; do
-    ${STRIP} "$so"
+    ${STRIP} -s "$so"
 done
 
 # Data files
