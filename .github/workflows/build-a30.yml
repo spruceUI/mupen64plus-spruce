@@ -1,0 +1,60 @@
+name: Build mupen64plus (A30)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mupen_version:
+        description: 'Mupen64Plus version tag'
+        default: 'master'
+  workflow_call:
+    inputs:
+      mupen_version:
+        type: string
+        default: 'master'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure beta release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="beta-${{ github.ref_name }}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" \
+              --target "${{ github.ref_name }}" \
+              --title "Beta Build (${{ github.ref_name }})" \
+              --prerelease \
+              --notes "Mupen64Plus binaries built from ${{ github.ref_name }}" \
+            || true
+
+      - name: Download A30 toolchain
+        run: |
+          wget -q -O a30_toolchain-v1.0.tar.gz \
+            "https://github.com/steward-fu/website/releases/download/miyoo-a30/a30_toolchain-v1.0.tar.gz"
+
+      - name: Build Docker image
+        run: docker build -f Dockerfile.a30 -t m64p-builder-a30 .
+
+      - name: Build Mupen64Plus
+        run: |
+          mkdir -p output
+          docker run --rm \
+            -e MUPEN_VERSION=${{ github.event.inputs.mupen_version || 'master' }} \
+            -v ${{ github.workspace }}/output:/output \
+            m64p-builder-a30
+
+      - name: Upload binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd output
+          tar czf ../mupen64plus-a30.tar.gz .
+          cd ..
+          gh release upload "beta-${{ github.ref_name }}" mupen64plus-a30.tar.gz --clobber

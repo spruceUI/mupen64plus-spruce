@@ -1,0 +1,22 @@
+name: Build All
+
+on:
+  workflow_dispatch:
+    inputs:
+      mupen_version:
+        description: 'Mupen64Plus version tag'
+        default: 'master'
+
+permissions:
+  contents: write
+
+jobs:
+  universal:
+    uses: ./.github/workflows/build-universal.yml
+    with:
+      mupen_version: ${{ inputs.mupen_version }}
+
+  a30:
+    uses: ./.github/workflows/build-a30.yml
+    with:
+      mupen_version: ${{ inputs.mupen_version }}
