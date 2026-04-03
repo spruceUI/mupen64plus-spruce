@@ -92,11 +92,11 @@ mkdir -p "$OUTPUT_DIR"
 
 # Frontend binary
 cp ui-console/projects/unix/mupen64plus "$OUTPUT_DIR/"
-${STRIP} "$OUTPUT_DIR/mupen64plus"
+${STRIP} -s "$OUTPUT_DIR/mupen64plus"
 
 # Core library
 cp core/projects/unix/libmupen64plus.so.2.0.0 "$OUTPUT_DIR/libmupen64plus.so.2"
-${STRIP} "$OUTPUT_DIR/libmupen64plus.so.2"
+${STRIP} -s "$OUTPUT_DIR/libmupen64plus.so.2"
 
 # Plugins
 cp audio-sdl/projects/unix/mupen64plus-audio-sdl.so "$OUTPUT_DIR/"
@@ -106,7 +106,7 @@ cp video-rice/projects/unix/mupen64plus-video-rice.so "$OUTPUT_DIR/"
 cp video-glide64mk2/projects/unix/mupen64plus-video-glide64mk2.so "$OUTPUT_DIR/"
 cp video-gliden64/src/build/plugin/Release/mupen64plus-video-GLideN64.so "$OUTPUT_DIR/"
 for so in "$OUTPUT_DIR"/mupen64plus-*.so; do
-    ${STRIP} "$so"
+    ${STRIP} -s "$so"
 done
 
 # Data files
