@@ -12,7 +12,8 @@ export STRIP=${CROSS}-strip
 export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig
 
-export OPTFLAGS="-O3 -flto=auto"
+export OPTFLAGS="-O3 -ffunction-sections -fdata-sections -flto=auto"
+export LDFLAGS="-Wl,--gc-sections -flto=auto"
 
 APIDIR=/build/core/src/api
 export SDL_CFLAGS="$(pkg-config --cflags sdl2)"
@@ -75,7 +76,9 @@ cmake .. \
     -DEGL=ON \
     -DUSE_SYSTEM_LIBS=ON \
     -DCMAKE_C_FLAGS="${OPTFLAGS}" \
-    -DCMAKE_CXX_FLAGS="${OPTFLAGS}"
+    -DCMAKE_CXX_FLAGS="${OPTFLAGS}" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
+    -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}"
 make -j$(nproc)
 cd /build
 

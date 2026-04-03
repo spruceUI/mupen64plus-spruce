@@ -17,8 +17,8 @@ export PKG_CONFIG_PATH="$SYSROOT/usr/lib/pkgconfig"
 export PKG_CONFIG_LIBDIR="$SYSROOT/usr/lib/pkgconfig"
 export PKG_CONFIG_SYSROOT_DIR="$SYSROOT"
 
-export OPTFLAGS="-O3 -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -flto=auto"
-export LDFLAGS="--sysroot=$SYSROOT -L$SYSROOT/usr/lib -static-libstdc++"
+export OPTFLAGS="-Ofast -ffunction-sections -fdata-sections -fomit-frame-pointer -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard -flto=auto"
+export LDFLAGS="-Wl,--gc-sections --sysroot=$SYSROOT -L$SYSROOT/usr/lib -static-libstdc++ -flto=auto"
 
 APIDIR=/build/core/src/api
 export SDL_CFLAGS="-I${SYSROOT}/usr/include/SDL2 -D_REENTRANT"
