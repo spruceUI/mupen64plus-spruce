@@ -21,10 +21,13 @@ export OPTFLAGS="-O3 -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -flto=auto
 export LDFLAGS="--sysroot=$SYSROOT -L$SYSROOT/usr/lib -static-libstdc++"
 
 APIDIR=/build/core/src/api
+export SDL_CFLAGS="-I${SYSROOT}/usr/include/SDL2 -D_REENTRANT"
+export SDL_LDLIBS="-lSDL2"
 
 m64p_make() {
-    make -C "$1" CROSS_COMPILE=${CROSS}- HOST_CPU=armv7l USE_GLES=1 NEW_DYNAREC=1 VFP_HARD=1 \
-        APIDIR="$APIDIR" OPTFLAGS="$OPTFLAGS" PREFIX="" V=1 -j$(nproc) all
+    make -C "$1" CROSS_COMPILE=${CROSS}- HOST_CPU=armv7l USE_GLES=1 NEW_DYNAREC=1 VFP_HARD=1 VULKAN=0 \
+        APIDIR="$APIDIR" SDL_CFLAGS="$SDL_CFLAGS" SDL_LDLIBS="$SDL_LDLIBS" \
+        OPTFLAGS="$OPTFLAGS" PREFIX="" V=1 -j$(nproc) all
 }
 
 echo "=== Building Mupen64Plus for A30 (armhf) ==="

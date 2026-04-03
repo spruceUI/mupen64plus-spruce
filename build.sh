@@ -15,10 +15,13 @@ export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig
 export OPTFLAGS="-O3 -flto=auto"
 
 APIDIR=/build/core/src/api
+export SDL_CFLAGS="$(pkg-config --cflags sdl2)"
+export SDL_LDLIBS="$(pkg-config --libs sdl2)"
 
 m64p_make() {
     make -C "$1" CROSS_COMPILE=${CROSS}- HOST_CPU=aarch64 USE_GLES=1 NEW_DYNAREC=1 VULKAN=0 \
-        APIDIR="$APIDIR" OPTFLAGS="$OPTFLAGS" PREFIX="" V=1 -j$(nproc) all
+        APIDIR="$APIDIR" SDL_CFLAGS="$SDL_CFLAGS" SDL_LDLIBS="$SDL_LDLIBS" \
+        OPTFLAGS="$OPTFLAGS" PREFIX="" V=1 -j$(nproc) all
 }
 
 echo "=== Building Mupen64Plus for aarch64 ==="
