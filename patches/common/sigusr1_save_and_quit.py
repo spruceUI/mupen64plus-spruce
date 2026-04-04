@@ -53,10 +53,21 @@ src = src.replace(
     1
 )
 
-# Register handler at emulation start
+# Register handler and auto-load at emulation start
 src = src.replace(
     '    g_EmulatorRunning = 1;',
-    '    main_setup_sigusr1();\n    g_EmulatorRunning = 1;',
+    '''    main_setup_sigusr1();
+
+    /* SpruceOS: auto-load save state from slot 0 if M64P_AUTOLOAD=1 */
+    {
+        const char *autoload = getenv("M64P_AUTOLOAD");
+        if (autoload && autoload[0] == '1') {
+            DebugMessage(M64MSG_INFO, "Auto-loading save state from slot 0");
+            main_state_load(NULL);
+        }
+    }
+
+    g_EmulatorRunning = 1;''',
     1
 )
 
