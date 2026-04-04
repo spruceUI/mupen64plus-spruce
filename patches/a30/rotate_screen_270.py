@@ -88,11 +88,11 @@ static void rot_init(int gameW, int gameH)
      * 270 CCW rotation tex coords map the landscape framebuffer
      * onto the portrait panel correctly */
     float verts[] = {
-        /* pos (NDC)     tex coord (270 CCW) */
-        -1.0f, -1.0f,   1.0f, 0.0f,
-         1.0f, -1.0f,   1.0f, 1.0f,
-        -1.0f,  1.0f,   0.0f, 0.0f,
-         1.0f,  1.0f,   0.0f, 1.0f,
+        /* pos (NDC)     tex coord (90 CCW) */
+        -1.0f, -1.0f,   0.0f, 1.0f,
+         1.0f, -1.0f,   0.0f, 0.0f,
+        -1.0f,  1.0f,   1.0f, 1.0f,
+         1.0f,  1.0f,   1.0f, 0.0f,
     };
     glGenBuffers(1, &l_RotVBO);
     glBindBuffer(GL_ARRAY_BUFFER, l_RotVBO);
