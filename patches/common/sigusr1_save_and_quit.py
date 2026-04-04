@@ -101,15 +101,22 @@ v_src = v_src.replace(
 )
 
 # Add check at the top of VidExt_GL_SwapBuffers
+# Two-phase: frame 1 sets save job, frame 2 stops after save completes
 old_swap = 'EXPORT m64p_error CALL VidExt_GL_SwapBuffers(void)\n{'
 new_swap = '''EXPORT m64p_error CALL VidExt_GL_SwapBuffers(void)
 {
-    /* SpruceOS: check for SIGUSR1 save-and-quit */
+    /* SpruceOS: SIGUSR1 save-and-quit (two-phase) */
+    static int l_saveAndQuitPhase = 0;
     if (g_SaveAndQuit) {
         g_SaveAndQuit = 0;
-        main_state_save(1, NULL);
-        main_stop();
-        return M64ERR_SUCCESS;
+        main_state_save(1, NULL); /* queue save job */
+        l_saveAndQuitPhase = 1;   /* stop on next frame */
+    } else if (l_saveAndQuitPhase > 0) {
+        l_saveAndQuitPhase++;
+        if (l_saveAndQuitPhase >= 3) { /* wait 2 frames for save to complete */
+            main_stop();
+            return M64ERR_SUCCESS;
+        }
     }
 '''
 
