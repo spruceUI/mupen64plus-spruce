@@ -67,15 +67,15 @@ static int setup_uinput(void)
     for (int i = 0; i < 256; i++)
         ioctl(fd, UI_SET_KEYBIT, i);
 
-    struct uinput_setup usetup;
-    memset(&usetup, 0, sizeof(usetup));
-    snprintf(usetup.name, UINPUT_MAX_NAME_SIZE, "a30_mupen_shim");
-    usetup.id.bustype = BUS_VIRTUAL;
-    usetup.id.vendor  = 0x1234;
-    usetup.id.product = 0x5678;
-    usetup.id.version = 1;
+    struct uinput_user_dev uidev;
+    memset(&uidev, 0, sizeof(uidev));
+    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "a30_mupen_shim");
+    uidev.id.bustype = BUS_VIRTUAL;
+    uidev.id.vendor  = 0x1234;
+    uidev.id.product = 0x5678;
+    uidev.id.version = 1;
 
-    ioctl(fd, UI_DEV_SETUP, &usetup);
+    write(fd, &uidev, sizeof(uidev));
     ioctl(fd, UI_DEV_CREATE);
 
     /* small delay for device to register */
