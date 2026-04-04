@@ -1,15 +1,17 @@
 /*
  * a30_input_shim - Input remapper for Miyoo A30 + mupen64plus
  *
- * Reads keyboard events from the A30's button input device (event3),
- * handles R2-hold modifier for C-button combos, and emits remapped
- * keyboard events via uinput.
+ * Reads keyboard events from the A30's button input device (event3).
+ * Normally does NOT grab — events pass through to SDL and the
+ * homebutton_watchdog as usual.
  *
- * When R2 is NOT held: buttons pass through as-is.
- * When R2 IS held: face buttons become C-button keycodes.
+ * When R2 is held: grabs event3, remaps face buttons to C-button
+ * keycodes via uinput. On R2 release: ungrabs, back to normal.
+ *
+ * This allows the home button / game switcher to work normally
+ * while still providing R2-hold C-button combos.
  *
  * Usage: a30_input_shim <input_device> &
- *        e.g. a30_input_shim /dev/input/event3 &
  *
  * A30 button keycodes (from platform cfg):
  *   A=57(space) B=29(lctrl) X=42(lshift) Y=56(lalt)
@@ -60,10 +62,7 @@ static int setup_uinput(void)
         return -1;
     }
 
-    /* enable key events */
     ioctl(fd, UI_SET_EVBIT, EV_KEY);
-
-    /* register all keycodes we might emit (0-255 covers standard keys) */
     for (int i = 0; i < 256; i++)
         ioctl(fd, UI_SET_KEYBIT, i);
 
@@ -77,8 +76,6 @@ static int setup_uinput(void)
 
     write(fd, &uidev, sizeof(uidev));
     ioctl(fd, UI_DEV_CREATE);
-
-    /* small delay for device to register */
     usleep(100000);
 
     return fd;
@@ -116,8 +113,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* grab the input device so events don't go elsewhere */
-    ioctl(input_fd, EVIOCGRAB, 1);
+    /* do NOT grab on startup — let watchdog and SDL read event3 normally */
 
     uinput_fd = setup_uinput();
     if (uinput_fd < 0) {
@@ -126,6 +122,7 @@ int main(int argc, char *argv[])
     }
 
     int r2_held = 0;
+    int grabbed = 0;
 
     struct input_event ev;
     while (running) {
@@ -133,19 +130,27 @@ int main(int argc, char *argv[])
         if (n != sizeof(ev))
             break;
 
-        /* pass through non-key events (SYN, etc.) */
-        if (ev.type != EV_KEY) {
-            emit(uinput_fd, ev.type, ev.code, ev.value);
-            continue;
-        }
+        if (ev.type != EV_KEY)
+            continue; /* ignore non-key events when not grabbed */
 
-        /* track R2 state but don't forward it — R2 is consumed as modifier */
         if (ev.code == KC_R2) {
-            r2_held = (ev.value != 0); /* 1=press, 2=repeat, 0=release */
-            continue;
+            if (ev.value == 1 && !r2_held) {
+                /* R2 pressed: grab event3 so face buttons only go through shim */
+                r2_held = 1;
+                ioctl(input_fd, EVIOCGRAB, 1);
+                grabbed = 1;
+            } else if (ev.value == 0 && r2_held) {
+                /* R2 released: ungrab, back to normal */
+                r2_held = 0;
+                if (grabbed) {
+                    ioctl(input_fd, EVIOCGRAB, 0);
+                    grabbed = 0;
+                }
+            }
+            continue; /* R2 is consumed, never forwarded */
         }
 
-        /* when R2 held, remap face buttons to C-button keycodes */
+        /* when R2 held (grabbed), remap face buttons to C-button keycodes */
         if (r2_held) {
             int remapped = -1;
             switch (ev.code) {
@@ -156,16 +161,17 @@ int main(int argc, char *argv[])
             }
             if (remapped >= 0) {
                 emit_key(uinput_fd, remapped, ev.value);
-                continue;
             }
+            /* while grabbed, all other keys are consumed (not forwarded) */
+            continue;
         }
 
-        /* pass through everything else unchanged */
-        emit_key(uinput_fd, ev.code, ev.value);
+        /* when not grabbed, do nothing — events go through event3 to SDL directly */
     }
 
     /* cleanup */
-    ioctl(input_fd, EVIOCGRAB, 0);
+    if (grabbed)
+        ioctl(input_fd, EVIOCGRAB, 0);
     close(input_fd);
 
     ioctl(uinput_fd, UI_DEV_DESTROY);
