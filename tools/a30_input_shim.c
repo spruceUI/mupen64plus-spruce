@@ -149,10 +149,10 @@ int main(int argc, char *argv[])
         if (r2_held) {
             int remapped = -1;
             switch (ev.code) {
-                case KC_A: remapped = KC_C_DOWN;  break;
-                case KC_B: remapped = KC_C_RIGHT; break;
-                case KC_X: remapped = KC_C_LEFT;  break;
-                case KC_Y: remapped = KC_C_UP;    break;
+                case KC_A: remapped = KC_C_RIGHT; break; /* East  → C-Right */
+                case KC_B: remapped = KC_C_DOWN;  break; /* South → C-Down  */
+                case KC_X: remapped = KC_C_UP;    break; /* North → C-Up    */
+                case KC_Y: remapped = KC_C_LEFT;  break; /* West  → C-Left  */
             }
             if (remapped >= 0) {
                 emit_key(uinput_fd, remapped, ev.value);
