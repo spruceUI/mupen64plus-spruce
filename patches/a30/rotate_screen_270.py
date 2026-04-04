@@ -93,8 +93,10 @@ static void rot_setup(int gameW, int gameH)
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, l_RotFBOTex, 0);
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, l_RotFBODepth);
 
-    /* bind FBO so plugins render to it */
+    /* bind FBO so plugins render to it, clear to black */
     glBindFramebuffer(GL_FRAMEBUFFER, l_RotFBO);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     /* 90 CCW rotation quad */
     float verts[] = {
@@ -175,8 +177,12 @@ src = src.replace(swap_marker, swap_code + swap_marker, 1)
 
 show_cursor = '    SDL_ShowCursor(SDL_DISABLE);\n'
 fbo_setup = '''
-    /* A30: create FBO at game resolution, bind it, report original size to plugins */
+    /* A30: clear screen, create FBO, report original size to plugins */
     if (l_RotEnabled == 1) {
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        SDL_GL_SwapWindow(l_pWindow);
+        glClear(GL_COLOR_BUFFER_BIT);
         rot_setup(l_OrigWidth, l_OrigHeight);
         /* report the game's logical size, not the swapped window size */
         Width = l_OrigWidth;
