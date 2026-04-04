@@ -83,32 +83,8 @@ with open(GLIDE_PATH, "w") as f:
 print("Patched Glide64mk2")
 
 # ============================================================
-# GLideN64: opengl_CachedFunctions.cpp
+# GLideN64: no viewport offset needed — GLideN64 has built-in
+# 4:3 aspect ratio centering. Just give it the full display
+# resolution and set aspect=1 (force 4:3).
 # ============================================================
-GLIDEN_PATH = "video-gliden64/src/Graphics/OpenGLContext/opengl_CachedFunctions.cpp"
-
-with open(GLIDEN_PATH, "r") as f:
-    src = f.read()
-
-# Add offset helper
-src = src.replace(
-    '#include "opengl_CachedFunctions.h"',
-    '#include "opengl_CachedFunctions.h"\n#include <stdlib.h>\n' + get_vp_offset_helper(),
-    1
-)
-
-# Single viewport choke point
-src = src.replace(
-    '\t\tglViewport(_x, _y, _width, _height);',
-    '\t\tglViewport(_x + _vp_offset(), _y, _width, _height);',
-)
-
-# Single scissor choke point
-src = src.replace(
-    '\t\tglScissor(_x, _y, _width, _height);',
-    '\t\tglScissor(_x + _vp_offset(), _y, _width, _height);',
-)
-
-with open(GLIDEN_PATH, "w") as f:
-    f.write(src)
-print("Patched GLideN64")
+print("GLideN64: skipped (uses built-in 4:3 centering)")
