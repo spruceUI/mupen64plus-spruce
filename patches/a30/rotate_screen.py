@@ -79,9 +79,27 @@ static void rot_apply(int w, int h)
 {
     if (!l_rotReady) rot_setup(w,h);
 
-    glBindTexture(GL_TEXTURE_2D,l_rotTex);
+    /* save GL state that Rice depends on between frames */
+    GLint sProg, sTex, sVBO, sActive, sVP[4];
+    GLboolean sDepth, sBlend, sCull, sScissor, sDepthMask;
+    GLfloat sClearColor[4];
+    glGetIntegerv(GL_CURRENT_PROGRAM, &sProg);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &sTex);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &sVBO);
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &sActive);
+    glGetIntegerv(GL_VIEWPORT, sVP);
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, sClearColor);
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &sDepthMask);
+    sDepth = glIsEnabled(GL_DEPTH_TEST);
+    sBlend = glIsEnabled(GL_BLEND);
+    sCull = glIsEnabled(GL_CULL_FACE);
+    sScissor = glIsEnabled(GL_SCISSOR_TEST);
+
+    /* capture framebuffer to texture */
+    glBindTexture(GL_TEXTURE_2D, l_rotTex);
     glCopyTexSubImage2D(GL_TEXTURE_2D,0,0,0,0,0,w,h);
 
+    /* draw rotated quad */
     glViewport(0,0,w,h);
     glClearColor(0,0,0,1);
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
@@ -89,6 +107,7 @@ static void rot_apply(int w, int h)
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
     glDisable(GL_SCISSOR_TEST);
+    glDepthMask(GL_FALSE);
     glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
 
     glUseProgram(l_rotProg);
@@ -103,11 +122,20 @@ static void rot_apply(int w, int h)
     glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,16,(void*)8);
     glDrawArrays(GL_TRIANGLE_STRIP,0,4);
 
+    /* restore ALL GL state */
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
-    glBindBuffer(GL_ARRAY_BUFFER,0);
-    glBindTexture(GL_TEXTURE_2D,0);
-    glUseProgram(0);
+    glBindBuffer(GL_ARRAY_BUFFER, sVBO);
+    glActiveTexture(sActive);
+    glBindTexture(GL_TEXTURE_2D, sTex);
+    glUseProgram(sProg);
+    glViewport(sVP[0], sVP[1], sVP[2], sVP[3]);
+    glClearColor(sClearColor[0], sClearColor[1], sClearColor[2], sClearColor[3]);
+    glDepthMask(sDepthMask);
+    if (sDepth) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+    if (sBlend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
+    if (sCull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if (sScissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
 }
 /* === end A30 rotation === */
 
