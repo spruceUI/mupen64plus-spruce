@@ -148,11 +148,10 @@ end_of_include_line = src.index("\n", last_include) + 1
 src = src[:end_of_include_line] + rotation_code + src[end_of_include_line:]
 
 # === 2. Patch VidExt_SetVideoMode to swap Width/Height ===
-# Find the line: DebugMessage(M64MSG_INFO, "Setting %i-bit video mode: %ix%i", BitsPerPixel, Width, Height);
-# Add dimension swap before it
+# Insert before the "set the mode" comment block, which precedes the if/else DebugMessage
 
-swap_marker = 'DebugMessage(M64MSG_INFO, "Setting %i-bit video mode: %ix%i", BitsPerPixel, Width, Height);'
-swap_code = '''/* A30: swap dimensions for portrait panel and enable rotation */
+swap_marker = '    /* set the mode */\n'
+swap_code = '''    /* A30: swap dimensions for portrait panel and enable rotation */
     {
         const char *rot_env = getenv("M64P_ROTATE");
         if (rot_env && rot_env[0] == '1') {
@@ -162,12 +161,10 @@ swap_code = '''/* A30: swap dimensions for portrait panel and enable rotation */
             int tmp = Width;
             Width = Height;
             Height = tmp;
-            DebugMessage(M64MSG_INFO, "A30 rotation: game %ix%i -> window %ix%i",
-                         l_GameWidth, l_GameHeight, Width, Height);
         }
     }
 
-    '''
+'''
 
 src = src.replace(swap_marker, swap_code + swap_marker, 1)
 
