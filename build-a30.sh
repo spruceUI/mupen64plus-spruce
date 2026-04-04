@@ -102,7 +102,7 @@ m64p_make ui-console/projects/unix
 
 # Build A30 input shim
 echo "=== Building a30_input_shim ==="
-${CC} ${OPTFLAGS} -o a30_input_shim /build/tools/a30_input_shim.c
+${CC} ${OPTFLAGS} -o a30_input_shim /tools/a30_input_shim.c
 ${STRIP} -s a30_input_shim
 
 # Collect output
