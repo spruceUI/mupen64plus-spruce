@@ -2,12 +2,15 @@
 """
 Patch mupen64plus-core vidext.c to rotate the display for the Miyoo A30.
 
-Creates window at 480x640 (matching panel), plugins render at 640x480
-into the GL framebuffer (clipped/stretched by the viewport mismatch),
-then we capture and draw rotated before swap.
+The A30 panel is 480x640 portrait. Mali fullscreen always creates a 480x640
+framebuffer. Plugins need 640x480 for the game — they get clipped without FBO.
 
-Not perfect — there will be aspect ratio distortion from the viewport
-mismatch — but it displays correctly oriented on the A30 panel.
+This patch:
+  - Saves the real EGL surface framebuffer ID before creating anything
+  - Creates an FBO at 640x480 so plugins can render the full game unclipped
+  - On swap: saves GL state, binds real screen FB, draws FBO rotated 90 CCW,
+    restores GL state, re-binds FBO for next frame
+  - GetDefaultFramebuffer returns FBO id for plugins that query it
 
 Activated by M64P_ROTATE=1 env var.
 """
@@ -20,17 +23,21 @@ with open(VIDEXT_PATH, "r") as f:
 code = r'''
 /* === A30 screen rotation === */
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 #include <stdlib.h>
 
 static int l_rot = -1;
+static GLint l_rotScreenFB = -1;
 static int l_rotW = 0, l_rotH = 0;
-static GLuint l_rotTex = 0, l_rotProg = 0, l_rotVBO = 0;
-static int l_rotReady = 0;
+static GLuint l_rotFBO = 0, l_rotColor = 0, l_rotDepth = 0;
+static GLuint l_rotProg = 0, l_rotVBO = 0;
 
-static void rot_setup(int w, int h)
+static void rot_init(int gameW, int gameH)
 {
-    if (l_rotReady) return;
+    /* save EGL surface FB id BEFORE creating our FBO */
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &l_rotScreenFB);
 
+    /* shader */
     const char *vs =
         "attribute vec2 p; attribute vec2 t;"
         "varying vec2 v;"
@@ -50,14 +57,34 @@ static void rot_setup(int w, int h)
     glLinkProgram(l_rotProg);
     glDeleteShader(v1); glDeleteShader(f1);
 
-    glGenTextures(1,&l_rotTex);
-    glBindTexture(GL_TEXTURE_2D,l_rotTex);
-    glTexImage2D(GL_TEXTURE_2D,0,GL_RGB,w,h,0,GL_RGB,GL_UNSIGNED_BYTE,0);
+    /* FBO color texture at game resolution */
+    glGenTextures(1,&l_rotColor);
+    glBindTexture(GL_TEXTURE_2D,l_rotColor);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,gameW,gameH,0,GL_RGBA,GL_UNSIGNED_BYTE,0);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-    glBindTexture(GL_TEXTURE_2D,0);
+
+    /* depth — try 24-bit (matches Mali default), fallback 16 */
+    glGenRenderbuffers(1,&l_rotDepth);
+    glBindRenderbuffer(GL_RENDERBUFFER,l_rotDepth);
+    glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT24_OES,gameW,gameH);
+
+    glGenFramebuffers(1,&l_rotFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER,l_rotFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,l_rotColor,0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,l_rotDepth);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+        glBindRenderbuffer(GL_RENDERBUFFER,l_rotDepth);
+        glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT16,gameW,gameH);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,l_rotDepth);
+    }
+
+    /* clear FBO to black */
+    glClearColor(0,0,0,1);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
     /* 90 CCW rotation quad */
     float q[]={
@@ -71,38 +98,30 @@ static void rot_setup(int w, int h)
     glBufferData(GL_ARRAY_BUFFER,sizeof(q),q,GL_STATIC_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER,0);
 
-    l_rotW=w; l_rotH=h;
-    l_rotReady=1;
+    l_rotW=gameW; l_rotH=gameH;
 }
 
-static void rot_apply(int w, int h)
+static void rot_blit(int scrW, int scrH)
 {
-    if (!l_rotReady) rot_setup(w,h);
-
-    /* save GL state that Rice depends on between frames */
+    /* save GL state */
     GLint sProg, sTex, sVBO, sActive, sVP[4];
     GLboolean sDepth, sBlend, sCull, sScissor, sDepthMask;
-    GLfloat sClearColor[4];
     glGetIntegerv(GL_CURRENT_PROGRAM, &sProg);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &sTex);
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &sVBO);
     glGetIntegerv(GL_ACTIVE_TEXTURE, &sActive);
     glGetIntegerv(GL_VIEWPORT, sVP);
-    glGetFloatv(GL_COLOR_CLEAR_VALUE, sClearColor);
     glGetBooleanv(GL_DEPTH_WRITEMASK, &sDepthMask);
     sDepth = glIsEnabled(GL_DEPTH_TEST);
     sBlend = glIsEnabled(GL_BLEND);
     sCull = glIsEnabled(GL_CULL_FACE);
     sScissor = glIsEnabled(GL_SCISSOR_TEST);
 
-    /* capture framebuffer to texture */
-    glBindTexture(GL_TEXTURE_2D, l_rotTex);
-    glCopyTexSubImage2D(GL_TEXTURE_2D,0,0,0,0,0,w,h);
-
-    /* draw rotated quad */
-    glViewport(0,0,w,h);
+    /* bind real screen, draw rotated FBO texture */
+    glBindFramebuffer(GL_FRAMEBUFFER, l_rotScreenFB);
+    glViewport(0,0,scrW,scrH);
     glClearColor(0,0,0,1);
-    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
@@ -112,7 +131,7 @@ static void rot_apply(int w, int h)
 
     glUseProgram(l_rotProg);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D,l_rotTex);
+    glBindTexture(GL_TEXTURE_2D,l_rotColor);
     glUniform1i(glGetUniformLocation(l_rotProg,"s"),0);
 
     glBindBuffer(GL_ARRAY_BUFFER,l_rotVBO);
@@ -122,7 +141,7 @@ static void rot_apply(int w, int h)
     glVertexAttribPointer(1,2,GL_FLOAT,GL_FALSE,16,(void*)8);
     glDrawArrays(GL_TRIANGLE_STRIP,0,4);
 
-    /* restore ALL GL state */
+    /* restore GL state */
     glDisableVertexAttribArray(0);
     glDisableVertexAttribArray(1);
     glBindBuffer(GL_ARRAY_BUFFER, sVBO);
@@ -130,12 +149,14 @@ static void rot_apply(int w, int h)
     glBindTexture(GL_TEXTURE_2D, sTex);
     glUseProgram(sProg);
     glViewport(sVP[0], sVP[1], sVP[2], sVP[3]);
-    glClearColor(sClearColor[0], sClearColor[1], sClearColor[2], sClearColor[3]);
     glDepthMask(sDepthMask);
     if (sDepth) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
     if (sBlend) glEnable(GL_BLEND); else glDisable(GL_BLEND);
     if (sCull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
     if (sScissor) glEnable(GL_SCISSOR_TEST); else glDisable(GL_SCISSOR_TEST);
+
+    /* re-bind FBO for next frame */
+    glBindFramebuffer(GL_FRAMEBUFFER, l_rotFBO);
 }
 /* === end A30 rotation === */
 
@@ -145,32 +166,59 @@ last_include = src.rfind("#include")
 end_of_line = src.index("\n", last_include) + 1
 src = src[:end_of_line] + code + src[end_of_line:]
 
-# === 2. Swap window dims ===
+# === 2. Check env var ===
 
 marker = '    /* set the mode */\n'
-swap = '''    /* A30: check rotation env, swap dims to fill portrait panel */
+env_check = '''    /* A30: check rotation env */
     if (l_rot == -1) {
         const char *e = getenv("M64P_ROTATE");
         l_rot = (e && e[0] == '1') ? 1 : 0;
     }
-    if (l_rot == 1) {
-        int tmp = Width;
-        Width = Height;
-        Height = tmp;
+
+'''
+src = src.replace(marker, env_check + marker, 1)
+
+# === 3. After ShowCursor: clear screen, create FBO ===
+
+cursor = '    SDL_ShowCursor(SDL_DISABLE);\n'
+setup = '''
+    /* A30: clear screen, create FBO at game resolution */
+    if (l_rot == 1 && l_rotFBO == 0) {
+        glClearColor(0,0,0,1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        SDL_GL_SwapWindow(l_pWindow);
+        glClear(GL_COLOR_BUFFER_BIT);
+        rot_init(Width, Height);
     }
 
 '''
-src = src.replace(marker, swap + marker, 1)
+src = src.replace(cursor, cursor + setup, 1)
 
-# === 3. SwapBuffers ===
+# === 4. GetDefaultFramebuffer returns FBO ===
+
+old_fb = '''    return 0;
+}
+
+EXPORT m64p_error CALL VidExt_VK_GetSurface'''
+new_fb = '''    if (l_rot == 1 && l_rotFBO != 0)
+        return l_rotFBO;
+    return 0;
+}
+
+EXPORT m64p_error CALL VidExt_VK_GetSurface'''
+src = src.replace(old_fb, new_fb, 1)
+
+# === 5. SwapBuffers ===
 
 old_swap = '''    SDL_GL_SwapWindow(l_pWindow);
     return M64ERR_SUCCESS;
 }'''
-new_swap = '''    if (l_rot == 1) {
-        int w, h;
-        SDL_GetWindowSize(l_pWindow, &w, &h);
-        rot_apply(w, h);
+new_swap = '''    if (l_rot == 1 && l_rotFBO != 0) {
+        int sw, sh;
+        SDL_GetWindowSize(l_pWindow, &sw, &sh);
+        rot_blit(sw, sh);
+        SDL_GL_SwapWindow(l_pWindow);
+        return M64ERR_SUCCESS;
     }
 
     SDL_GL_SwapWindow(l_pWindow);
@@ -181,4 +229,4 @@ src = src.replace(old_swap, new_swap, 1)
 with open(VIDEXT_PATH, "w") as f:
     f.write(src)
 
-print("Patched vidext.c with A30 rotation (swap dims + copy-rotate)")
+print("Patched vidext.c with A30 rotation (FBO + screen FB query + state restore)")
