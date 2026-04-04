@@ -148,10 +148,9 @@ env_check = '''    /* A30: check rotation env, store game resolution */
         const char *e = getenv("M64P_ROTATE");
         l_rot = (e && e[0] == '1') ? 1 : 0;
     }
-    static int l_rot_gameW = 0, l_rot_gameH = 0;
     if (l_rot == 1) {
-        l_rot_gameW = Width;
-        l_rot_gameH = Height;
+        l_rotW = Width;
+        l_rotH = Height;
     }
 
 '''
@@ -165,7 +164,7 @@ old_swap = '''    SDL_GL_SwapWindow(l_pWindow);
 new_swap = '''    if (l_rot == 1) {
         int sw, sh;
         SDL_GetWindowSize(l_pWindow, &sw, &sh);
-        rot_apply(l_rot_gameW, l_rot_gameH, sw, sh);
+        rot_apply(l_rotW, l_rotH, sw, sh);
     }
 
     SDL_GL_SwapWindow(l_pWindow);
