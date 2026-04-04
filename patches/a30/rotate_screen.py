@@ -148,10 +148,15 @@ src = src[:end_of_line] + code + src[end_of_line:]
 # === 2. Swap window dims ===
 
 marker = '    /* set the mode */\n'
-swap = '''    /* A30: check rotation env */
+swap = '''    /* A30: check rotation env, swap dims to fill portrait panel */
     if (l_rot == -1) {
         const char *e = getenv("M64P_ROTATE");
         l_rot = (e && e[0] == '1') ? 1 : 0;
+    }
+    if (l_rot == 1) {
+        int tmp = Width;
+        Width = Height;
+        Height = tmp;
     }
 
 '''
