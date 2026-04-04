@@ -54,8 +54,10 @@ clone gonetz/GLideN64                       video-gliden64 master
 
 # Apply patches
 echo "=== Applying patches ==="
-for patch in /patches/common/*.py; do
-    [ -f "$patch" ] && python3 "$patch" && echo "Applied: $(basename $patch)"
+for dir in /patches/common /patches/universal; do
+    for patch in "$dir"/*.py; do
+        [ -f "$patch" ] && python3 "$patch" && echo "Applied: $(basename $patch)"
+    done
 done
 
 # Build core
