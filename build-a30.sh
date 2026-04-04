@@ -100,6 +100,11 @@ cd /build
 echo "=== Building frontend ==="
 m64p_make ui-console/projects/unix
 
+# Build A30 input shim
+echo "=== Building a30_input_shim ==="
+${CC} ${OPTFLAGS} -o a30_input_shim /build/tools/a30_input_shim.c
+${STRIP} -s a30_input_shim
+
 # Collect output
 echo "=== Collecting output ==="
 mkdir -p "$OUTPUT_DIR"
@@ -107,6 +112,9 @@ mkdir -p "$OUTPUT_DIR"
 # Frontend binary
 cp ui-console/projects/unix/mupen64plus "$OUTPUT_DIR/"
 ${STRIP} -s "$OUTPUT_DIR/mupen64plus"
+
+# A30 input shim
+cp a30_input_shim "$OUTPUT_DIR/"
 
 # Core library
 cp core/projects/unix/libmupen64plus.so.2.0.0 "$OUTPUT_DIR/libmupen64plus.so.2"
