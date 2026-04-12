@@ -11,8 +11,8 @@ RUN dpkg --add-architecture arm64 && \
     apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
-    gcc-aarch64-linux-gnu \
-    g++-aarch64-linux-gnu \
+    gcc-10-aarch64-linux-gnu \
+    g++-10-aarch64-linux-gnu \
     pkg-config \
     git \
     ca-certificates \
@@ -27,6 +27,22 @@ RUN dpkg --add-architecture arm64 && \
     libpng-dev:arm64 \
     zlib1g-dev:arm64 \
     && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install \
+    /usr/bin/aarch64-linux-gnu-gcc aarch64-linux-gnu-gcc \
+    /usr/bin/aarch64-linux-gnu-gcc-10 10 \
+    --slave \
+    /usr/bin/aarch64-linux-gnu-g++ aarch64-linux-gnu-g++ \
+    /usr/bin/aarch64-linux-gnu-g++-10 \
+    --slave \
+    /usr/bin/aarch64-linux-gnu-gcc-ar aarch64-linux-gnu-gcc-ar \
+    /usr/bin/aarch64-linux-gnu-gcc-ar-10 \
+    --slave \
+    /usr/bin/aarch64-linux-gnu-gcc-nm aarch64-linux-gnu-gcc-nm \
+    /usr/bin/aarch64-linux-gnu-gcc-nm-10 \
+    --slave \
+    /usr/bin/aarch64-linux-gnu-gcc-ranlib aarch64-linux-gnu-gcc-ranlib \
+    /usr/bin/aarch64-linux-gnu-gcc-ranlib-10
 
 COPY build.sh /build.sh
 RUN chmod +x /build.sh
