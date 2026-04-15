@@ -947,6 +947,28 @@ static void ovl_sdl_free_icon(int icon_id) {
 static int ovl_sdl_save_captured_frame(const char* path) {
 	if (!path || !s_captureSurface)
 		return -1;
+
+	// Crop to game viewport (exclude black pillarbox bars on widescreen)
+	const char* vp_env = getenv("M64P_VIEWPORT_X");
+	int vp_x = vp_env ? atoi(vp_env) : 0;
+	if (vp_x > 0 && vp_x < s_screenW) {
+		int game_w = s_screenW - vp_x * 2;
+		if (game_w > 0 && game_w < s_screenW) {
+			SDL_Rect crop = {vp_x, 0, game_w, s_screenH};
+			SDL_Surface* cropped = SDL_CreateRGBSurfaceWithFormat(
+				0, game_w, s_screenH, 32, s_captureSurface->format->format);
+			if (cropped) {
+				SDL_BlitSurface(s_captureSurface, &crop, cropped, NULL);
+				int ret = SDL_SaveBMP(cropped, path);
+				SDL_FreeSurface(cropped);
+				if (ret != 0)
+					fprintf(stderr, "[OverlaySDL] SDL_SaveBMP(%s) failed: %s\n", path, SDL_GetError());
+				return ret;
+			}
+		}
+	}
+
+	// No crop needed (fullscreen or no viewport offset)
 	if (SDL_SaveBMP(s_captureSurface, path) != 0) {
 		fprintf(stderr, "[OverlaySDL] SDL_SaveBMP(%s) failed: %s\n", path, SDL_GetError());
 		return -1;
