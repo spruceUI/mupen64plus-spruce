@@ -46,9 +46,11 @@ src = src.replace(
     '''#include "version.h"
 
 /* SpruceOS overlay menu integration */
+extern "C" {
 #include "emu_frontend.h"
 #include "emu_overlay_render.h"
-extern EmuOvlRenderBackend* overlay_sdl_get_backend(void);
+EmuOvlRenderBackend* overlay_sdl_get_backend(void);
+}
 
 static bool s_overlayReady = false;
 
