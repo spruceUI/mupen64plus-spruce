@@ -20,6 +20,7 @@ RUN dpkg --add-architecture arm64 && \
     nasm \
     ccache \
     libsdl2-dev:arm64 \
+    libsdl2-ttf-dev:arm64 \
     libasound2-dev:arm64 \
     libfreetype6-dev:arm64 \
     libgles2-mesa-dev:arm64 \
@@ -31,6 +32,7 @@ RUN dpkg --add-architecture arm64 && \
 COPY build.sh /build.sh
 RUN chmod +x /build.sh
 COPY patches/ /patches/
+COPY overlay/ /overlay/
 
 WORKDIR /build
 ENTRYPOINT ["/build.sh"]

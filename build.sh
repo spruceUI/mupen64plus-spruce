@@ -126,6 +126,9 @@ cp video-rice/data/* "$OUTPUT_DIR/data/"
 cp video-glide64mk2/data/* "$OUTPUT_DIR/data/"
 cp video-gliden64/ini/* "$OUTPUT_DIR/data/" 2>/dev/null || true
 
+# Overlay settings
+cp /overlay/overlay_settings.json "$OUTPUT_DIR/data/"
+
 echo "=== ccache stats ==="
 ccache --show-stats
 
