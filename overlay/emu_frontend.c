@@ -11,8 +11,8 @@
 // Frame skip: owned here, read by GLideN64 RSP.cpp via extern
 int g_frameSkip = 0;
 
-// Analog sensitivity: owned by ui-console main.c, written here, read by input-sdl
-extern int g_analogSensitivity;
+// Analog sensitivity: written here, read by input-sdl (if patched)
+int g_analogSensitivity = 0;
 
 // Forward declarations for scope-aware save system
 static const char* get_per_game_path(void);

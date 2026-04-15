@@ -84,9 +84,9 @@ bool emu_frontend_shortcut_is_held(const ShortcutBinding* s);
 // Frame skip value (owned by emu_frontend, read by GLideN64 RSP.cpp via extern)
 extern int g_frameSkip;
 
-// Analog sensitivity modifier (owned by ui-console main.c, written by emu_frontend)
+// Analog sensitivity modifier (owned by emu_frontend)
 // 0 = 100% (default), 25/50/75 = output percentage
-extern int g_analogSensitivity;
+extern int g_analogSensitivity; // defined in emu_frontend.c
 
 // N64 button mapping (10 remappable action buttons)
 #define N64_REMAP_COUNT 10
