@@ -618,30 +618,17 @@ static void shorten_title(EmuOvlRenderBackend* r, const char* in, char* out,
 	}
 }
 
-// Draw the title inside a dark rounded pill at the top-left
-// (matches NextUI Quick Menu's GFX_blitPillLight call on ASSET_WHITE_PILL)
+// Draw the title text at top-left (SpruceOS IGM style — plain text, no pill)
 static void draw_menu_bar(EmuOvl* ovl, const char* title) {
 	EmuOvlRenderBackend* r = ovl->render;
-	int pill_h = S(PILL_SIZE);
 	int pad = S(BUTTON_PADDING);
 
-	// Available inner width = screen - side padding - pill internal padding
-	int max_inner_w = ovl->screen_w - PADDING_PX * 2 - pad * 2;
-	char display[256];
-	shorten_title(r, title, display, sizeof(display), max_inner_w);
+	int x = PADDING_PX + pad;
+	int y = PADDING_PX + pad;
 
-	int text_w = r->text_width(display, EMU_OVL_FONT_LARGE);
-	int pill_w = text_w + pad * 2;
-	int max_pill_w = ovl->screen_w - PADDING_PX * 2;
-	if (pill_w > max_pill_w)
-		pill_w = max_pill_w;
-	int x = PADDING_PX;
-	int y = PADDING_PX;
-
-	draw_pill(r, x, y, pill_w, pill_h, EMU_OVL_COLOR_ROW_BG);
-
-	int text_y = y + (pill_h - r->text_height(EMU_OVL_FONT_LARGE)) / 2;
-	r->draw_text(display, x + pad, text_y, EMU_OVL_COLOR_WHITE, EMU_OVL_FONT_LARGE);
+	draw_shadowed_text(r, "spruceOS Menu", x, y,
+					   EMU_OVL_COLOR_WHITE, EMU_OVL_FONT_SMALL);
+	(void)title; // title available for future use
 }
 
 // Map a button name to its icon handle, or -1 if no icon loaded
@@ -809,53 +796,51 @@ static void draw_settings_row(EmuOvl* ovl, int x, int y, int w, int h,
 							  bool selected, bool cycleable, int label_font) {
 	EmuOvlRenderBackend* r = ovl->render;
 	int row_pad = S(BUTTON_PADDING);
+	int text_y_pos = y + (h - r->text_height(label_font)) / 2;
 
 	if (selected) {
+		// SpruceOS IGM style: flat golden bar behind selected item
 		if (value) {
-			// 2-layer: full-width COLOR2 + label-width COLOR1
-			draw_pill(r, x, y, w, h, EMU_OVL_COLOR_ROW_BG);
-
-			int lw = r->text_width(label, label_font);
-			int label_pill_w = lw + row_pad * 2;
-			draw_pill(r, x, y, label_pill_w, h, EMU_OVL_COLOR_ROW_SEL);
-
-			// Label text (black on white pill)
-			int text_y_pos = y + (h - r->text_height(label_font)) / 2;
+			// Settings row with value: golden bar full width
+			r->draw_rect(x, y, w, h, EMU_OVL_COLOR_ROW_SEL);
+			// Label text (cream on golden bar)
 			r->draw_text(label, x + row_pad, text_y_pos,
 						 EMU_OVL_COLOR_TEXT_SEL, label_font);
-
-			// Value text (white, right-aligned, with arrows if cycleable)
+			// Value text (cream, right-aligned, with arrows if cycleable)
 			char display[192];
 			if (cycleable)
 				snprintf(display, sizeof(display), "< %s >", value);
 			else
 				snprintf(display, sizeof(display), "%s", value);
-
 			int vw = r->text_width(display, EMU_OVL_FONT_TINY);
 			int val_x = x + w - row_pad - vw;
 			int val_y = y + (h - r->text_height(EMU_OVL_FONT_TINY)) / 2;
-			r->draw_text(display, val_x, val_y, EMU_OVL_COLOR_WHITE, EMU_OVL_FONT_TINY);
+			r->draw_text(display, val_x, val_y, EMU_OVL_COLOR_TEXT_SEL, EMU_OVL_FONT_TINY);
 		} else {
-			// Single label rect (no value)
+			// Main menu item (no value): centered text with golden bar
 			int lw = r->text_width(label, label_font);
-			int label_pill_w = lw + row_pad * 2;
-			draw_pill(r, x, y, label_pill_w, h, EMU_OVL_COLOR_ROW_SEL);
-
-			int text_y_pos = y + (h - r->text_height(label_font)) / 2;
-			r->draw_text(label, x + row_pad, text_y_pos,
+			int bar_w = lw + row_pad * 2;
+			int bar_x = x + (w - bar_w) / 2;
+			r->draw_rect(bar_x, y, bar_w, h, EMU_OVL_COLOR_ROW_SEL);
+			int text_x = x + (w - lw) / 2;
+			r->draw_text(label, text_x, text_y_pos,
 						 EMU_OVL_COLOR_TEXT_SEL, label_font);
 		}
 	} else {
-		// Unselected: no background, white text with shadow for readability
-		int text_y_pos = y + (h - r->text_height(label_font)) / 2;
-		draw_shadowed_text(r, label, x + row_pad, text_y_pos,
-						   EMU_OVL_COLOR_WHITE, label_font);
-
 		if (value) {
+			// Unselected settings row: text with shadow, left-aligned
+			draw_shadowed_text(r, label, x + row_pad, text_y_pos,
+							   EMU_OVL_COLOR_WHITE, label_font);
 			int vw = r->text_width(value, EMU_OVL_FONT_TINY);
 			int val_x = x + w - row_pad - vw;
 			int val_y = y + (h - r->text_height(EMU_OVL_FONT_TINY)) / 2;
 			draw_shadowed_text(r, value, val_x, val_y, EMU_OVL_COLOR_WHITE, EMU_OVL_FONT_TINY);
+		} else {
+			// Unselected main menu item: centered text with shadow
+			int lw = r->text_width(label, label_font);
+			int text_x = x + (w - lw) / 2;
+			draw_shadowed_text(r, label, text_x, text_y_pos,
+							   EMU_OVL_COLOR_WHITE, label_font);
 		}
 	}
 }
@@ -952,8 +937,7 @@ static void render_main_menu(EmuOvl* ovl) {
 		}
 	}
 
-	const char* hints[] = {"B", "BACK", "A", "OKAY"};
-	draw_footer_hints(ovl, hints, 4);
+	// No footer hints — matches SpruceOS IGM clean style
 }
 
 static void render_section_list(EmuOvl* ovl) {
