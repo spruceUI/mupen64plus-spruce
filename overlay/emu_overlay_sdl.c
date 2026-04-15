@@ -177,6 +177,19 @@ static GLuint link_program(GLuint vs, GLuint fs) {
 
 static int ovl_sdl_init(int screen_w, int screen_h) {
 	ovl_load_gl3_procs();
+
+	// Use actual SDL window size if available (plugin may report render
+	// resolution which can differ from the real display on widescreen)
+	SDL_Window* win = SDL_GL_GetCurrentWindow();
+	if (win) {
+		int real_w = 0, real_h = 0;
+		SDL_GL_GetDrawableSize(win, &real_w, &real_h);
+		if (real_w > 0 && real_h > 0) {
+			screen_w = real_w;
+			screen_h = real_h;
+		}
+	}
+
 	s_screenW = screen_w;
 	s_screenH = screen_h;
 
