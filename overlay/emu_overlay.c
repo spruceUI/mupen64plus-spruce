@@ -266,12 +266,15 @@ int emu_ovl_init(EmuOvl* ovl, EmuOvlConfig* cfg, EmuOvlRenderBackend* render,
 
 	build_main_menu(ovl);
 
-	// Screenshot directory (matches minarch's .minui path for game switcher)
+	// Screenshot directory and ROM file for save state previews
 	ovl->screenshot_dir[0] = '\0';
 	ovl->rom_file[0] = '\0';
 	const char* ss_dir = getenv("EMU_OVERLAY_SCREENSHOT_DIR");
 	if (ss_dir && ss_dir[0] != '\0')
 		snprintf(ovl->screenshot_dir, sizeof(ovl->screenshot_dir), "%s", ss_dir);
+	else
+		snprintf(ovl->screenshot_dir, sizeof(ovl->screenshot_dir),
+				 "/mnt/SDCARD/Saves/screenshots/mupen64plus");
 	const char* rom_file = getenv("EMU_OVERLAY_ROMFILE");
 	if (rom_file && rom_file[0] != '\0')
 		snprintf(ovl->rom_file, sizeof(ovl->rom_file), "%s", rom_file);

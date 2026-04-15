@@ -269,11 +269,11 @@ int emu_ovl_cfg_load(EmuOvlConfig* cfg, const char* json_path) {
 	cfg->save_state = json_get_bool(root, "save_state", false);
 	cfg->load_state = json_get_bool(root, "load_state", false);
 
-	// Determine active video plugin for filtering. Defaults to "gliden64" if
-	// the env var is unset, preserving behavior for users pre-Rice.
+	// Determine active video plugin for filtering (set by mupen_functions.sh).
+	// Default to "rice" — the most common plugin on SpruceOS.
 	const char* active_plugin = getenv("EMU_VIDEO_PLUGIN");
 	if (!active_plugin || active_plugin[0] == '\0')
-		active_plugin = "gliden64";
+		active_plugin = "rice";
 
 	cfg->section_count = 0;
 	const cJSON* sections_arr = cJSON_GetObjectItemCaseSensitive(root, "sections");

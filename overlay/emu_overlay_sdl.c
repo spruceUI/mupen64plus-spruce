@@ -213,10 +213,17 @@ static int ovl_sdl_init(int screen_w, int screen_h) {
 		s_icons[i] = NULL;
 	s_iconCount = 0;
 
-	// Load font
+	// Load font — env var override, otherwise derive from HOME
 	const char* font_path = getenv("EMU_OVERLAY_FONT");
+	char font_buf[512] = "";
 	if (!font_path || font_path[0] == '\0') {
-		fprintf(stderr, "[OverlaySDL] EMU_OVERLAY_FONT not set\n");
+		const char* home = getenv("HOME");
+		if (home && home[0] != '\0')
+			snprintf(font_buf, sizeof(font_buf), "%s/font.ttf", home);
+		font_path = font_buf;
+	}
+	if (!font_path || font_path[0] == '\0') {
+		fprintf(stderr, "[OverlaySDL] No font path (set EMU_OVERLAY_FONT or HOME)\n");
 		return -1;
 	}
 

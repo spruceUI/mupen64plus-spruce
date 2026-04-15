@@ -215,8 +215,25 @@ static void load_button_mappings_from_file(const char* path) {
 	fclose(f);
 }
 
-void emu_frontend_write_button_map_file(void) {
+static const char* get_button_map_path(void) {
+	static char buf[512] = "";
 	const char* path = getenv("EMU_BUTTON_MAP_FILE");
+	if (path && path[0] != '\0') return path;
+	if (buf[0] != '\0') return buf;
+	// Derive from INI path directory
+	if (s_overlayIniPath[0] != '\0') {
+		snprintf(buf, sizeof(buf), "%s", s_overlayIniPath);
+		char* slash = strrchr(buf, '/');
+		if (slash)
+			snprintf(slash + 1, sizeof(buf) - (slash + 1 - buf), "button_map.txt");
+		else
+			buf[0] = '\0';
+	}
+	return buf;
+}
+
+void emu_frontend_write_button_map_file(void) {
+	const char* path = get_button_map_path();
 	if (!path || path[0] == '\0') return;
 	FILE* f = fopen(path, "w");
 	if (!f) return;
@@ -751,13 +768,11 @@ static void load_cheats(void) {
 	uint32_t crc2 = __builtin_bswap32(header.CRC2);
 	snprintf(romCrc, sizeof(romCrc), "%08X-%08X-C:%X", crc1, crc2, header.Country_code & 0xff);
 
-	const char* jsonPath = getenv("EMU_OVERLAY_JSON");
-	if (!jsonPath) return;
+	// mupencheat.txt lives alongside the binary in HOME
+	const char* home = getenv("HOME");
+	if (!home || home[0] == '\0') return;
 	char cheatPath[512];
-	snprintf(cheatPath, sizeof(cheatPath), "%s", jsonPath);
-	char* lastSlash = strrchr(cheatPath, '/');
-	if (lastSlash) *lastSlash = '\0';
-	strncat(cheatPath, "/mupencheat.txt", sizeof(cheatPath) - strlen(cheatPath) - 1);
+	snprintf(cheatPath, sizeof(cheatPath), "%s/mupencheat.txt", home);
 
 	FILE* f = fopen(cheatPath, "r");
 	if (!f) return;
@@ -985,10 +1000,29 @@ static void process_aspect_shortcut(void) {
 // ---------------------------------------------------------------------------
 
 static void overlay_init_paths(void) {
+	// Env vars override auto-derived paths.
 	const char* json = getenv("EMU_OVERLAY_JSON");
 	const char* ini  = getenv("EMU_OVERLAY_INI");
-	if (json) strncpy(s_overlayJsonPath, json, sizeof(s_overlayJsonPath) - 1);
-	if (ini)  strncpy(s_overlayIniPath,  ini,  sizeof(s_overlayIniPath) - 1);
+
+	if (json && json[0] != '\0') {
+		strncpy(s_overlayJsonPath, json, sizeof(s_overlayJsonPath) - 1);
+	}
+	if (ini && ini[0] != '\0') {
+		strncpy(s_overlayIniPath, ini, sizeof(s_overlayIniPath) - 1);
+	}
+
+	// Auto-derive from HOME (set by mupen_functions.sh to the mupen directory).
+	// overlay_settings.json and font.ttf ship alongside the binary in HOME.
+	// mupen64plus.cfg lives at $HOME/.config/mupen64plus/mupen64plus.cfg.
+	const char* home = getenv("HOME");
+	if (home && home[0] != '\0') {
+		if (s_overlayJsonPath[0] == '\0')
+			snprintf(s_overlayJsonPath, sizeof(s_overlayJsonPath),
+					 "%s/overlay_settings.json", home);
+		if (s_overlayIniPath[0] == '\0')
+			snprintf(s_overlayIniPath, sizeof(s_overlayIniPath),
+					 "%s/.config/mupen64plus/mupen64plus.cfg", home);
+	}
 }
 
 // Context for overlay GL init, dispatched on video thread
@@ -1070,7 +1104,21 @@ static void overlay_ensure_init(int w, int h) {
 	ctx.w = w;
 	ctx.h = h;
 	ctx.render = s_pluginOps.get_render();
-	ctx.gameName = getenv("EMU_OVERLAY_GAME");
+	// Game display name: env var, or derive from ROM filename
+	const char* gameName = getenv("EMU_OVERLAY_GAME");
+	static char gameNameBuf[256] = "";
+	if ((!gameName || gameName[0] == '\0') && gameNameBuf[0] == '\0') {
+		const char* rom = getenv("EMU_OVERLAY_ROMFILE");
+		if (rom && rom[0] != '\0') {
+			const char* base = strrchr(rom, '/');
+			base = base ? base + 1 : rom;
+			snprintf(gameNameBuf, sizeof(gameNameBuf), "%s", base);
+			char* dot = strrchr(gameNameBuf, '.');
+			if (dot) *dot = '\0';
+		}
+		gameName = gameNameBuf;
+	}
+	ctx.gameName = gameName;
 	ctx.result = -1;
 
 	s_pluginOps.exec_on_video_thread(overlay_init_on_gl_thread, &ctx);
@@ -1489,9 +1537,36 @@ static EmuOvlAction run_overlay_loop(void) {
 	return action;
 }
 
-// Path to the per-game config file for this ROM
+// Path to the per-game config file for this ROM.
+// Derive from INI dir + ROM filename: <ini_dir>/per-game/<romname>.cfg
 static const char* get_per_game_path(void) {
-	return getenv("EMU_PER_GAME_CFG");
+	const char* env = getenv("EMU_PER_GAME_CFG");
+	if (env && env[0] != '\0') return env;
+
+	static char buf[512] = "";
+	if (buf[0] != '\0') return buf;
+
+	const char* rom = getenv("EMU_OVERLAY_ROMFILE");
+	if (!rom || rom[0] == '\0' || s_overlayIniPath[0] == '\0')
+		return NULL;
+
+	// Get directory of INI file
+	char dir[512];
+	snprintf(dir, sizeof(dir), "%s", s_overlayIniPath);
+	char* slash = strrchr(dir, '/');
+	if (!slash) return NULL;
+	*(slash + 1) = '\0';
+
+	// Get ROM basename without extension
+	const char* romBase = strrchr(rom, '/');
+	romBase = romBase ? romBase + 1 : rom;
+	char romName[256];
+	snprintf(romName, sizeof(romName), "%s", romBase);
+	char* dot = strrchr(romName, '.');
+	if (dot) *dot = '\0';
+
+	snprintf(buf, sizeof(buf), "%sper-game/%s.cfg", dir, romName);
+	return buf;
 }
 
 // Path to the ".customized" stamp (console scope indicator)
@@ -1643,6 +1718,13 @@ static void handle_restore_defaults(void) {
 		}
 		// Re-seed mupen64plus.cfg from default.cfg
 		const char* default_cfg = getenv("EMU_DEFAULT_CFG");
+		char default_cfg_buf[512] = "";
+		if ((!default_cfg || default_cfg[0] == '\0') && s_overlayIniPath[0] != '\0') {
+			snprintf(default_cfg_buf, sizeof(default_cfg_buf), "%s", s_overlayIniPath);
+			char* sl = strrchr(default_cfg_buf, '/');
+			if (sl) snprintf(sl + 1, sizeof(default_cfg_buf) - (sl + 1 - default_cfg_buf), "default.cfg");
+			default_cfg = default_cfg_buf;
+		}
 		if (default_cfg && default_cfg[0] != '\0' && s_overlayIniPath[0] != '\0') {
 			// Copy default.cfg over mupen64plus.cfg
 			FILE* src = fopen(default_cfg, "r");
