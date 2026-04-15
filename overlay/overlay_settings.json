@@ -112,11 +112,13 @@
           "type": "cycle",
           "values": [
             0,
-            1
+            1,
+            2
           ],
           "labels": [
             "GLideN64",
-            "Rice"
+            "Rice",
+            "Glide64mk2"
           ],
           "default": 1,
           "ini_section": "SpruceOS"
