@@ -64,6 +64,15 @@ done
 echo "=== Building core ==="
 m64p_make core/projects/unix
 
+# Build overlay static library (linked into each video plugin)
+echo "=== Building overlay ==="
+for src in /overlay/emu_overlay.c /overlay/emu_overlay_cfg.c /overlay/emu_overlay_sdl.c /overlay/emu_frontend.c /overlay/cjson/cJSON.c; do
+    obj="/overlay/$(basename $src .c).o"
+    ${CC} ${OPTFLAGS} -fPIC -I/overlay -I/overlay/cjson ${SDL_CFLAGS} -I${APIDIR} -c "$src" -o "$obj"
+done
+${AR} rcs /overlay/liboverlay.a /overlay/emu_overlay.o /overlay/emu_overlay_cfg.o /overlay/emu_overlay_sdl.o /overlay/emu_frontend.o /overlay/cJSON.o
+echo "Built /overlay/liboverlay.a"
+
 # Build plugins
 echo "=== Building plugins ==="
 m64p_make audio-sdl/projects/unix

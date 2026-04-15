@@ -2,31 +2,17 @@
 """
 Patch mupen64plus-video-glide64mk2 to integrate the SpruceOS overlay menu.
 
-Adds overlay source files to the build, resolves core API functions,
+Links the pre-built overlay static library, resolves core API functions,
 and calls emu_frontend_init/frame from UpdateScreen().
 """
 
-import os
-
 # ============================================================
-# 1. Patch Makefile: add overlay sources and SDL2_ttf
+# 1. Patch Makefile: add overlay includes and link library
 # ============================================================
 MAKEFILE_PATH = "video-glide64mk2/projects/unix/Makefile"
 
 with open(MAKEFILE_PATH, "r") as f:
     mk = f.read()
-
-# Add overlay source files after the last source file in the SOURCE list
-mk = mk.replace(
-    '$(SRCDIR)/Glide64/Util.cpp',
-    '''$(SRCDIR)/Glide64/Util.cpp \\
-	/overlay/emu_overlay.c \\
-	/overlay/emu_overlay_cfg.c \\
-	/overlay/emu_overlay_sdl.c \\
-	/overlay/emu_frontend.c \\
-	/overlay/cjson/cJSON.c''',
-    1
-)
 
 # Add overlay include path to CFLAGS
 mk = mk.replace(
@@ -35,10 +21,10 @@ mk = mk.replace(
     1
 )
 
-# Add SDL2_ttf and dl to linker flags
+# Add overlay static library and SDL2_ttf to linker flags
 mk = mk.replace(
     'LDLIBS += $(SDL_LDLIBS)',
-    'LDLIBS += $(SDL_LDLIBS) -lSDL2_ttf -ldl',
+    'LDLIBS += $(SDL_LDLIBS) /overlay/liboverlay.a -lSDL2_ttf -ldl',
     1
 )
 
