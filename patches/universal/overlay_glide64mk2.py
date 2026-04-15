@@ -42,8 +42,8 @@ with open(MAIN_PATH, "r") as f:
 
 # Add overlay includes near the top — after the m64p includes
 src = src.replace(
-    '#include "m64p_config.h"',
-    '''#include "m64p_config.h"
+    '#include "osal_dynamiclib.h"',
+    '''#include "osal_dynamiclib.h"
 
 /* SpruceOS overlay menu integration */
 extern "C" {
