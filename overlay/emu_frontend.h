@@ -2,6 +2,7 @@
 #define EMU_FRONTEND_H
 
 #include <stdbool.h>
+#include <signal.h>
 #include <SDL2/SDL.h>
 #include "emu_overlay.h"
 #include "emu_overlay_cfg.h"
@@ -44,6 +45,12 @@ void emu_frontend_init(EmuFrontendCoreAPI* api, EmuFrontendPluginOps* ops);
 // Called every frame from the video plugin's render loop. w/h are current
 // screen dimensions (used for overlay GL init on first open).
 void emu_frontend_frame(int w, int h);
+
+// SIGUSR2 overlay toggle flag (set by signal handler, checked each frame)
+extern volatile sig_atomic_t g_OpenOverlay;
+
+// Register SIGUSR2 handler for overlay toggle (called from main/startup)
+void emu_frontend_setup_sigusr2(void);
 
 // Cleanup (called on exit paths — rewind buffer)
 void emu_frontend_cleanup(void);

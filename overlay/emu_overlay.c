@@ -1211,7 +1211,7 @@ void emu_ovl_render(EmuOvl* ovl) {
 		return;
 
 	r->begin_frame();
-	r->draw_captured_frame(0.55f);
+	r->draw_captured_frame(0.2f);
 
 	switch (ovl->state) {
 	case EMU_OVL_STATE_MAIN_MENU:

@@ -5,8 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <SDL2/SDL.h>
+
+// SIGUSR2 overlay toggle: set by signal handler, checked by frame loop
+volatile sig_atomic_t g_OpenOverlay = 0;
 
 // Frame skip: owned here, read by GLideN64 RSP.cpp via extern
 int g_frameSkip = 0;
@@ -43,7 +47,6 @@ static bool s_overlayConfigLoaded = false;
 static bool s_overlayConfigFailed = false;
 static char s_overlayJsonPath[512] = "";
 static char s_overlayIniPath[512] = "";
-static bool s_menuBtnPrev = false;
 static Uint8 s_prevHat = 0;
 static Uint32 s_prevButtons = 0;
 #define OVL_AXIS_DEADZONE 16000
@@ -1093,14 +1096,18 @@ static void overlay_ensure_init(int w, int h) {
 	fprintf(stderr, "[Overlay] Initialized successfully (%dx%d)\n", w, h);
 }
 
-static bool check_menu_button(void) {
-	SDL_JoystickUpdate();
-	if (!s_joy) return false;
+static void sigusr2_handler(int sig) {
+	(void)sig;
+	g_OpenOverlay = 1;
+}
 
-	bool pressed = SDL_JoystickGetButton(s_joy, 8) != 0;
-	bool justPressed = pressed && !s_menuBtnPrev;
-	s_menuBtnPrev = pressed;
-	return justPressed;
+void emu_frontend_setup_sigusr2(void) {
+	struct sigaction sa;
+	memset(&sa, 0, sizeof(sa));
+	sa.sa_handler = sigusr2_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = 0;
+	sigaction(SIGUSR2, &sa, NULL);
 }
 
 static EmuOvlInput poll_overlay_input(void) {
@@ -1139,10 +1146,10 @@ static EmuOvlInput poll_overlay_input(void) {
 	s_prevAxisY = axisY;
 
 	// Buttons — edge detect: only trigger on newly-pressed buttons
-	// SDL button indices: 0=A(hw), 1=B(hw), 2=X(hw), 3=Y(hw), 4=L1, 5=R1, 8=Menu
-	static const int btnMap[] = {0, 1, 4, 5, 8};
+	// SDL button indices: 0=A(hw), 1=B(hw), 4=L1, 5=R1
+	static const int btnMap[] = {0, 1, 4, 5};
 	Uint32 curButtons = 0;
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < 4; i++) {
 		if (SDL_JoystickGetButton(s_joy, btnMap[i]))
 			curButtons |= (1u << btnMap[i]);
 	}
@@ -1153,7 +1160,12 @@ static EmuOvlInput poll_overlay_input(void) {
 	if (btnPressed & (1u << 1)) input.a    = true;
 	if (btnPressed & (1u << 4)) input.l1   = true;
 	if (btnPressed & (1u << 5)) input.r1   = true;
-	if (btnPressed & (1u << 8)) input.menu = true;
+
+	// Menu signal: SIGUSR2 from homebutton_watchdog
+	if (g_OpenOverlay) {
+		g_OpenOverlay = 0;
+		input.menu = true;
+	}
 
 	return input;
 }
@@ -1187,14 +1199,13 @@ static EmuOvlAction run_overlay_loop(void) {
 	s_prevAxisX = SDL_JoystickGetAxis(s_joy, 0);
 	s_prevAxisY = SDL_JoystickGetAxis(s_joy, 1);
 	s_prevButtons = 0;
-	static const int menu_btns[] = {0, 1, 4, 5, 8};
-	for (int i = 0; i < 5; i++) {
+	static const int menu_btns[] = {0, 1, 4, 5};
+	for (int i = 0; i < 4; i++) {
 		if (SDL_JoystickGetButton(s_joy, menu_btns[i]))
 			s_prevButtons |= (1u << menu_btns[i]);
 	}
 	SDL_Event ev;
 	while (SDL_PollEvent(&ev)) {}
-	s_menuBtnPrev = true; // prevent re-trigger
 
 	// Menu loop: input polled here, update+render+swap dispatched to video thread
 	while (emu_ovl_is_active(&s_overlay)) {
@@ -1717,6 +1728,7 @@ void emu_frontend_init(EmuFrontendCoreAPI* api, EmuFrontendPluginOps* ops) {
 	if (api) s_coreAPI = *api;
 	if (ops) s_pluginOps = *ops;
 	s_initialized = true;
+	emu_frontend_setup_sigusr2();
 }
 
 EmuOvlConfig* emu_frontend_get_overlay_config(void) {
@@ -1738,9 +1750,10 @@ void emu_frontend_frame(int w, int h) {
 		process_sensitivity_shortcuts();
 	}
 
-	// Overlay menu: ensure loaded, then handle menu button press
+	// Overlay menu: ensure loaded, then handle SIGUSR2 from watchdog
 	overlay_ensure_init(w, h);
-	if (s_overlayInitialized && check_menu_button()) {
+	if (s_overlayInitialized && g_OpenOverlay) {
+		g_OpenOverlay = 0;
 		EmuOvlAction action = run_overlay_loop();
 		handle_overlay_action(action);
 	}
