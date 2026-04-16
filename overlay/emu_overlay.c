@@ -10,7 +10,7 @@
 // NextUI's desktop platform (1024x768, FIXED_SCALE=3) overrides PADDING to 5,
 // while tg5050 (1280x720, FIXED_SCALE=2) uses the default PADDING=10. We match
 // both by varying ovl_padding at init time.
-#define PILL_SIZE 30
+#define PILL_SIZE 25
 #define BUTTON_SIZE 20
 #define BUTTON_MARGIN 5
 #define BUTTON_PADDING 12
@@ -795,12 +795,8 @@ static void render_main_menu(EmuOvl* ovl) {
 	int content_x = PADDING_PX;
 	int content_w = ovl->screen_w - PADDING_PX * 2;
 
+	// Main menu always shows all items (no scrolling — it's a short fixed list)
 	int vis_count = ovl->main_item_count;
-	if (vis_count > ovl->items_per_page)
-		vis_count = ovl->items_per_page;
-	// Vertically center the list between the title pill and the footer pill,
-	// matching NextUI's minarch.c Menu_loop():
-	//   oy = ((DEVICE_HEIGHT/FIXED_SCALE - PADDING*2) - (n * PILL_SIZE)) / 2
 	int list_y = calc_centered_list_y(ovl, vis_count);
 
 	// Only use left half for menu items (right half reserved for save preview)
