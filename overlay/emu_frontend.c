@@ -1769,6 +1769,13 @@ static void handle_overlay_action(EmuOvlAction action) {
 	case EMU_OVL_ACTION_QUIT:
 		request_stop();
 		break;
+	case EMU_OVL_ACTION_RESTART: {
+		// Write restart flag so the launch script relaunches instead of exiting
+		FILE* f = fopen("/tmp/mupen_restart", "w");
+		if (f) fclose(f);
+		request_stop();
+		break;
+	}
 	case EMU_OVL_ACTION_SAVE_STATE: {
 		int slot = emu_ovl_get_action_param(&s_overlay);
 		s_currentSlot = slot;

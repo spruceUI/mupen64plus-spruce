@@ -22,6 +22,7 @@ typedef enum {
 	EMU_OVL_ACTION_SAVE_STATE,
 	EMU_OVL_ACTION_LOAD_STATE,
 	EMU_OVL_ACTION_QUIT,
+	EMU_OVL_ACTION_RESTART,
 	EMU_OVL_ACTION_SAVE_CONSOLE,    // Save Changes → Save for Console
 	EMU_OVL_ACTION_SAVE_GAME,       // Save Changes → Save for Game
 	EMU_OVL_ACTION_RESTORE_DEFAULTS // Save Changes → Restore Defaults
@@ -44,6 +45,7 @@ typedef enum {
 	EMU_OVL_MAIN_SAVE,
 	EMU_OVL_MAIN_LOAD,
 	EMU_OVL_MAIN_OPTIONS,
+	EMU_OVL_MAIN_RESTART,
 	EMU_OVL_MAIN_QUIT
 } EmuOvlMainItemType;
 

@@ -49,6 +49,10 @@ static void build_main_menu(EmuOvl* ovl) {
 		n++;
 	}
 
+	snprintf(ovl->main_items[n].label, sizeof(ovl->main_items[n].label), "Restart");
+	ovl->main_items[n].type = EMU_OVL_MAIN_RESTART;
+	n++;
+
 	snprintf(ovl->main_items[n].label, sizeof(ovl->main_items[n].label), "Quit");
 	ovl->main_items[n].type = EMU_OVL_MAIN_QUIT;
 	n++;
@@ -369,6 +373,11 @@ bool emu_ovl_update(EmuOvl* ovl, EmuOvlInput* input) {
 				ovl->scroll_offset = 0;
 				ovl->current_section = 0;
 				break;
+			case EMU_OVL_MAIN_RESTART:
+				free_slot_screenshots(ovl);
+				ovl->action = EMU_OVL_ACTION_RESTART;
+				ovl->state = EMU_OVL_STATE_CLOSED;
+				return false;
 			case EMU_OVL_MAIN_QUIT:
 				free_slot_screenshots(ovl);
 				ovl->action = EMU_OVL_ACTION_QUIT;
