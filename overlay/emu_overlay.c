@@ -276,8 +276,11 @@ int emu_ovl_init(EmuOvl* ovl, EmuOvlConfig* cfg, EmuOvlRenderBackend* render,
 		snprintf(ovl->screenshot_dir, sizeof(ovl->screenshot_dir),
 				 "/mnt/SDCARD/Saves/screenshots/mupen64plus");
 	const char* rom_file = getenv("EMU_OVERLAY_ROMFILE");
-	if (rom_file && rom_file[0] != '\0')
-		snprintf(ovl->rom_file, sizeof(ovl->rom_file), "%s", rom_file);
+	if (rom_file && rom_file[0] != '\0') {
+		const char* base = strrchr(rom_file, '/');
+		base = base ? base + 1 : rom_file;
+		snprintf(ovl->rom_file, sizeof(ovl->rom_file), "%s", base);
+	}
 
 	// Init slot screenshot icons
 	for (int i = 0; i < EMU_OVL_MAX_SLOTS; i++)
