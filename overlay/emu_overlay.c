@@ -632,128 +632,52 @@ static void draw_menu_bar(EmuOvl* ovl, const char* title) {
 	int x = PADDING_PX + pad;
 	int y = PADDING_PX + pad;
 
-	draw_shadowed_text(r, "spruceOS Menu", x, y,
+	draw_shadowed_text(r, title, x, y,
 					   EMU_OVL_COLOR_WHITE, EMU_OVL_FONT_SMALL);
-	(void)title; // title available for future use
 }
 
-// Map a button name to its icon handle, or -1 if no icon loaded
-static int get_hint_icon(EmuOvl* ovl, const char* btn_name) {
-	if (strcmp(btn_name, "A") == 0)
-		return ovl->icon_a;
-	if (strcmp(btn_name, "B") == 0)
-		return ovl->icon_b;
-	if (strcmp(btn_name, "LEFT/RIGHT") == 0)
-		return ovl->icon_dpad_h;
-	return -1;
-}
-
-// Measure a button glyph's width (a circle for single-char labels like "A"/"B",
-// a pill for multi-char labels like "POWER", or a loaded PNG icon for special
-// hints like "LEFT/RIGHT"). Mirrors NextUI's GFX_getButtonWidth.
-static int measure_button_glyph(EmuOvl* ovl, const char* btn, int btn_inner_h) {
-	EmuOvlRenderBackend* r = ovl->render;
-	if (strlen(btn) == 1) {
-		// Single-char button is always a filled BUTTON_SIZE circle (programmatic)
-		return btn_inner_h;
-	}
-	// Special multi-char hints with PNG icons (d-pad etc.)
-	int icon_id = get_hint_icon(ovl, btn);
-	if (icon_id >= 0 && r->icon_width)
-		return r->icon_width(icon_id);
-	// Plain multi-char button (POWER/MENU): pill at BUTTON_SIZE/2 + text_w width,
-	// text in font.tiny
-	int tw = r->text_width(btn, EMU_OVL_FONT_TINY);
-	return btn_inner_h / 2 + tw;
-}
-
-// Draw a single button glyph at (gx, gy). btn_inner_h is the inner pill height
-// (== BUTTON_SIZE scaled). Returns the glyph width. Mirrors NextUI's
-// single-char and multi-char branches of GFX_blitButton.
-static int draw_button_glyph(EmuOvl* ovl, const char* btn, int gx, int gy,
-							 int btn_inner_h) {
-	EmuOvlRenderBackend* r = ovl->render;
-	if (strlen(btn) == 1) {
-		// Filled white circle + centered dark letter in font.medium
-		draw_pill(r, gx, gy, btn_inner_h, btn_inner_h, EMU_OVL_COLOR_ROW_SEL);
-		int tw = r->text_width(btn, EMU_OVL_FONT_MEDIUM);
-		int th = r->text_height(EMU_OVL_FONT_MEDIUM);
-		r->draw_text(btn, gx + (btn_inner_h - tw) / 2,
-					 gy + (btn_inner_h - th) / 2,
-					 EMU_OVL_COLOR_TEXT_SEL, EMU_OVL_FONT_MEDIUM);
-		return btn_inner_h;
-	}
-	// PNG icon path for special hints (d-pad)
-	int icon_id = get_hint_icon(ovl, btn);
-	if (icon_id >= 0 && r->draw_icon) {
-		r->draw_icon(icon_id, gx, gy);
-		return r->icon_width(icon_id);
-	}
-	// Multi-char inner pill (POWER/MENU): width = BUTTON_SIZE/2 + text_w,
-	// text in font.tiny, drawn at BUTTON_SIZE/4 offset from the pill's left edge.
-	int tw = r->text_width(btn, EMU_OVL_FONT_TINY);
-	int w = btn_inner_h / 2 + tw;
-	draw_pill(r, gx, gy, w, btn_inner_h, EMU_OVL_COLOR_ROW_SEL);
-	int th = r->text_height(EMU_OVL_FONT_TINY);
-	r->draw_text(btn, gx + btn_inner_h / 4, gy + (btn_inner_h - th) / 2,
-				 EMU_OVL_COLOR_TEXT_SEL, EMU_OVL_FONT_TINY);
-	return w;
-}
-
-// Draw a button-hint group inside a dark rounded outer pill.
+// Draw a button-hint group as plain text at the bottom of the screen.
 // Entries alternate: button_label, action_label, button_label, action_label, …
 // align_right = true → bottom-right anchored, else bottom-left.
-//
-// Mirrors NextUI's GFX_blitButtonGroup layout: all inner gaps are BUTTON_MARGIN
-// (= 5 scaled), so the outer pill content width is:
-//   ow = BM + sum_i(BM + glyph_i + BM + label_i + BM) + BM
+// Format: "B BACK    A OPEN" — button name in accent color, action in white.
 static void draw_button_group(EmuOvl* ovl, const char* hints[], int hint_count,
 							  bool align_right) {
 	EmuOvlRenderBackend* r = ovl->render;
-	int pill_h = S(PILL_SIZE);
-	int inner_h = S(BUTTON_SIZE);
-	int bm = S(BUTTON_MARGIN);	// all inner margins are BUTTON_MARGIN per NextUI
+	int bm = S(BUTTON_MARGIN);
+	int font = EMU_OVL_FONT_SMALL;
 
-	// Pass 1: measure total width using NextUI's per-pair formula:
-	//   pair_w = glyph + BM + label + BM
-	//   ow = BM + (BM + pair_w) * N = sum + (2*N + 1) * BM + sum_glyphs + sum_labels
-	int group_w = bm;
+	// Pass 1: measure total width
+	int group_w = 0;
 	for (int i = 0; i < hint_count; i += 2) {
-		int pair_w = measure_button_glyph(ovl, hints[i], inner_h);
-		pair_w += bm;
+		if (i > 0) group_w += bm * 2;
+		group_w += r->text_width(hints[i], font);
 		if (i + 1 < hint_count)
-			pair_w += r->text_width(hints[i + 1], EMU_OVL_FONT_SMALL);
-		pair_w += bm;
-		group_w += bm + pair_w;
+			group_w += bm + r->text_width(hints[i + 1], font);
 	}
 	int x = align_right ? (ovl->screen_w - PADDING_PX - group_w) : PADDING_PX;
-	int y = ovl->screen_h - PADDING_PX - pill_h;
+	int y = ovl->screen_h - PADDING_PX - r->text_height(font);
 
-	// Outer dark pill
-	draw_pill(r, x, y, group_w, pill_h, EMU_OVL_COLOR_ROW_BG);
-
-	// Pass 2: draw contents. Start at x + BM, advance by (pair_w + BM) per pair.
-	int cx = x + bm;
-	int inner_y = y + (pill_h - inner_h) / 2;
-	int text_y = y + (pill_h - r->text_height(EMU_OVL_FONT_SMALL)) / 2;
+	// Pass 2: draw
+	int cx = x;
 	for (int i = 0; i < hint_count; i += 2) {
-		int gw = draw_button_glyph(ovl, hints[i], cx, inner_y, inner_h);
-		int label_x = cx + gw + bm;
-		int label_w = 0;
+		if (i > 0) cx += bm * 2;
+		// Button name in accent color
+		draw_shadowed_text(r, hints[i], cx, y, EMU_OVL_COLOR_ROW_SEL, font);
+		cx += r->text_width(hints[i], font);
 		if (i + 1 < hint_count) {
-			r->draw_text(hints[i + 1], label_x, text_y,
-						 EMU_OVL_COLOR_WHITE, EMU_OVL_FONT_SMALL);
-			label_w = r->text_width(hints[i + 1], EMU_OVL_FONT_SMALL);
+			cx += bm;
+			// Action label in white
+			draw_shadowed_text(r, hints[i + 1], cx, y, EMU_OVL_COLOR_WHITE, font);
+			cx += r->text_width(hints[i + 1], font);
 		}
-		// pair_w = gw + bm + label_w + bm; advance by pair_w + bm
-		cx += gw + bm + label_w + bm + bm;
 	}
 }
 
 // Is this button a navigation hint (d-pad, L/R, etc.) that should go in the
 // left-aligned group, per NextUI's two-group footer convention?
 static bool is_nav_hint(const char* btn) {
-	return strcmp(btn, "LEFT/RIGHT") == 0 ||
+	return strcmp(btn, "D-PAD") == 0 ||
+		   strcmp(btn, "LEFT/RIGHT") == 0 ||
 		   strcmp(btn, "UP/DOWN") == 0 ||
 		   strcmp(btn, "L/R") == 0 ||
 		   strcmp(btn, "L1/R1") == 0;
@@ -861,7 +785,7 @@ static void draw_centered_text(EmuOvlRenderBackend* r, const char* text, int cx,
 static void render_main_menu(EmuOvl* ovl) {
 	EmuOvlRenderBackend* r = ovl->render;
 
-	draw_menu_bar(ovl, ovl->game_name);
+	draw_menu_bar(ovl, "spruceOS Menu");
 
 	int row_h = S(PILL_SIZE);
 	int content_x = PADDING_PX;
@@ -1107,7 +1031,7 @@ static void render_section_items(EmuOvl* ovl) {
 		}
 	}
 
-	const char* hints[] = {"LEFT/RIGHT", "CHANGE", "B", "BACK"};
+	const char* hints[] = {"D-PAD", "CHANGE", "B", "BACK"};
 	draw_footer_hints(ovl, hints, 4);
 }
 
@@ -1162,7 +1086,7 @@ static void render_cheats(EmuOvl* ovl) {
 					 EMU_OVL_COLOR_GRAY, EMU_OVL_FONT_TINY);
 	}
 
-	const char* hints[] = {"LEFT/RIGHT", "CHANGE", "B", "BACK"};
+	const char* hints[] = {"D-PAD", "CHANGE", "B", "BACK"};
 	draw_footer_hints(ovl, hints, 4);
 }
 
