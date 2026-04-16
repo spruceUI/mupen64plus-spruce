@@ -1,0 +1,83 @@
+#ifndef EMU_OVERLAY_CFG_H
+#define EMU_OVERLAY_CFG_H
+
+#include <stdbool.h>
+
+#define EMU_OVL_MAX_SECTIONS 16
+#define EMU_OVL_MAX_ITEMS 32
+#define EMU_OVL_MAX_VALUES 16
+#define EMU_OVL_MAX_STR 128
+
+// Settings save scope — mirrors NextUI minarch's CONFIG_NONE/CONSOLE/GAME enum.
+// Determines where the overlay writes on "Save" and what "Restore Defaults" deletes.
+typedef enum {
+	EMU_SCOPE_NONE = 0,   // no user config — pure JSON defaults
+	EMU_SCOPE_CONSOLE,    // user has saved global customizations (mupen64plus.cfg)
+	EMU_SCOPE_GAME,       // per-game overrides exist (per-game/<rom>.cfg)
+} EmuConfigScope;
+
+typedef enum {
+	EMU_OVL_TYPE_BOOL,
+	EMU_OVL_TYPE_CYCLE,
+	EMU_OVL_TYPE_INT
+} EmuOvlItemType;
+
+typedef struct {
+	char key[EMU_OVL_MAX_STR];
+	char label[EMU_OVL_MAX_STR];
+	char description[EMU_OVL_MAX_STR];
+	char ini_section[EMU_OVL_MAX_STR]; // optional per-item INI section override
+	EmuOvlItemType type;
+	int values[EMU_OVL_MAX_VALUES];
+	char labels[EMU_OVL_MAX_VALUES][EMU_OVL_MAX_STR];
+	char string_values[EMU_OVL_MAX_VALUES][EMU_OVL_MAX_STR];
+	bool is_string_cycle;
+	int value_count;
+	int int_min, int_max, int_step;
+	int float_scale; // >0: INI value is float; multiply by scale to get int, divide when writing
+	int default_value;
+	int current_value;
+	int staged_value;
+	bool dirty;
+} EmuOvlItem;
+
+typedef struct {
+	char name[EMU_OVL_MAX_STR];
+	char ini_section[EMU_OVL_MAX_STR]; // INI section for this group (optional, falls back to global config_section)
+	EmuOvlItem items[EMU_OVL_MAX_ITEMS];
+	int item_count;
+} EmuOvlSection;
+
+typedef struct {
+	char emulator[EMU_OVL_MAX_STR];
+	char config_file[EMU_OVL_MAX_STR];
+	char config_section[EMU_OVL_MAX_STR];
+	char options_hint[256];
+	bool save_state;
+	bool load_state;
+	EmuOvlSection sections[EMU_OVL_MAX_SECTIONS];
+	int section_count;
+} EmuOvlConfig;
+
+int emu_ovl_cfg_load(EmuOvlConfig* cfg, const char* json_path);
+void emu_ovl_cfg_free(EmuOvlConfig* cfg);
+int emu_ovl_cfg_read_ini(EmuOvlConfig* cfg, const char* ini_path);
+int emu_ovl_cfg_write_ini(EmuOvlConfig* cfg, const char* ini_path);
+
+// Per-game overrides: read a standard INI file and overlay matching items'
+// current_value/staged_value on top of whatever was already loaded via
+// emu_ovl_cfg_read_ini. Returns 0 on success, -1 on error (file missing
+// is not an error — returns 0 with no changes).
+int emu_ovl_cfg_read_per_game(EmuOvlConfig* cfg, const char* path);
+
+// Scoped write: writes ALL items (full snapshot) to `path` in standard INI
+// format with [Section] headers. Used for "Save for Game".
+int emu_ovl_cfg_write_per_game(EmuOvlConfig* cfg, const char* path);
+
+void emu_ovl_cfg_reset_staged(EmuOvlConfig* cfg);
+void emu_ovl_cfg_reset_section_to_defaults(EmuOvlSection* sec);
+void emu_ovl_cfg_reset_all_to_defaults(EmuOvlConfig* cfg);
+void emu_ovl_cfg_apply_staged(EmuOvlConfig* cfg);
+bool emu_ovl_cfg_has_changes(EmuOvlConfig* cfg);
+
+#endif

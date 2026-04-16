@@ -1,0 +1,1198 @@
+#include "emu_overlay.h"
+#include "emu_overlay_icons.h"
+#include "emu_frontend.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+// Layout constants (pre-scaled) — based on NextUI's common/defines.h.
+// NextUI's desktop platform (1024x768, FIXED_SCALE=3) overrides PADDING to 5,
+// while tg5050 (1280x720, FIXED_SCALE=2) uses the default PADDING=10. We match
+// both by varying ovl_padding at init time.
+#define PILL_SIZE 25
+#define BUTTON_SIZE 20
+#define BUTTON_MARGIN 5
+#define BUTTON_PADDING 12
+
+static int ovl_scale = 2;
+static int ovl_padding = 10;
+#define S(x) ((x) * ovl_scale)
+#define PADDING_PX (ovl_padding * ovl_scale)
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+static void build_main_menu(EmuOvl* ovl) {
+	int n = 0;
+
+	snprintf(ovl->main_items[n].label, sizeof(ovl->main_items[n].label), "Continue");
+	ovl->main_items[n].type = EMU_OVL_MAIN_CONTINUE;
+	n++;
+
+	if (ovl->config->save_state) {
+		snprintf(ovl->main_items[n].label, sizeof(ovl->main_items[n].label), "Save");
+		ovl->main_items[n].type = EMU_OVL_MAIN_SAVE;
+		n++;
+	}
+
+	if (ovl->config->load_state) {
+		snprintf(ovl->main_items[n].label, sizeof(ovl->main_items[n].label), "Load");
+		ovl->main_items[n].type = EMU_OVL_MAIN_LOAD;
+		n++;
+	}
+
+	if (ovl->config->section_count > 0) {
+		snprintf(ovl->main_items[n].label, sizeof(ovl->main_items[n].label), "Options");
+		ovl->main_items[n].type = EMU_OVL_MAIN_OPTIONS;
+		n++;
+	}
+
+	snprintf(ovl->main_items[n].label, sizeof(ovl->main_items[n].label), "Restart");
+	ovl->main_items[n].type = EMU_OVL_MAIN_RESTART;
+	n++;
+
+	snprintf(ovl->main_items[n].label, sizeof(ovl->main_items[n].label), "Quit");
+	ovl->main_items[n].type = EMU_OVL_MAIN_QUIT;
+	n++;
+
+	ovl->main_item_count = n;
+}
+
+static int find_options_index(EmuOvl* ovl) {
+	for (int i = 0; i < ovl->main_item_count; i++) {
+		if (ovl->main_items[i].type == EMU_OVL_MAIN_OPTIONS)
+			return i;
+	}
+	return 0;
+}
+
+static void cycle_item_next(EmuOvlItem* item) {
+	switch (item->type) {
+	case EMU_OVL_TYPE_BOOL:
+		item->staged_value = item->staged_value ? 0 : 1;
+		break;
+	case EMU_OVL_TYPE_CYCLE: {
+		int idx = -1;
+		for (int i = 0; i < item->value_count; i++) {
+			if (item->values[i] == item->staged_value) {
+				idx = i;
+				break;
+			}
+		}
+		if (idx < 0)
+			idx = 0;
+		else
+			idx = (idx + 1) % item->value_count;
+		item->staged_value = item->values[idx];
+		break;
+	}
+	case EMU_OVL_TYPE_INT:
+		item->staged_value += item->int_step;
+		if (item->staged_value > item->int_max)
+			item->staged_value = item->int_min;
+		break;
+	}
+	item->dirty = (item->staged_value != item->current_value);
+}
+
+static void cycle_item_prev(EmuOvlItem* item) {
+	switch (item->type) {
+	case EMU_OVL_TYPE_BOOL:
+		item->staged_value = item->staged_value ? 0 : 1;
+		break;
+	case EMU_OVL_TYPE_CYCLE: {
+		int idx = -1;
+		for (int i = 0; i < item->value_count; i++) {
+			if (item->values[i] == item->staged_value) {
+				idx = i;
+				break;
+			}
+		}
+		if (idx < 0)
+			idx = 0;
+		else
+			idx = (idx - 1 + item->value_count) % item->value_count;
+		item->staged_value = item->values[idx];
+		break;
+	}
+	case EMU_OVL_TYPE_INT:
+		item->staged_value -= item->int_step;
+		if (item->staged_value < item->int_min)
+			item->staged_value = item->int_max;
+		break;
+	}
+	item->dirty = (item->staged_value != item->current_value);
+}
+
+static const char* get_item_display_value(EmuOvlItem* item, char* buf, int buf_size) {
+	switch (item->type) {
+	case EMU_OVL_TYPE_BOOL:
+		return item->staged_value ? "On" : "Off";
+	case EMU_OVL_TYPE_CYCLE:
+		for (int i = 0; i < item->value_count; i++) {
+			if (item->values[i] == item->staged_value) {
+				if (item->labels[i][0] != '\0')
+					return item->labels[i];
+				snprintf(buf, buf_size, "%d", item->staged_value);
+				return buf;
+			}
+		}
+		snprintf(buf, buf_size, "%d", item->staged_value);
+		return buf;
+	case EMU_OVL_TYPE_INT:
+		snprintf(buf, buf_size, "%d", item->staged_value);
+		return buf;
+	}
+	return "";
+}
+
+static void ensure_scroll(EmuOvl* ovl, int total_count) {
+	if (ovl->selected < ovl->scroll_offset)
+		ovl->scroll_offset = ovl->selected;
+	else if (ovl->selected >= ovl->scroll_offset + ovl->items_per_page)
+		ovl->scroll_offset = ovl->selected - ovl->items_per_page + 1;
+	if (ovl->scroll_offset < 0)
+		ovl->scroll_offset = 0;
+	int max_scroll = total_count - ovl->items_per_page;
+	if (max_scroll < 0)
+		max_scroll = 0;
+	if (ovl->scroll_offset > max_scroll)
+		ovl->scroll_offset = max_scroll;
+}
+
+// L1/R1 page jump: move `selected` by `dir * page` items, clamped to [0, total-1].
+// For short lists (total <= page) this reduces to "jump to first/last".
+static int page_jump(int selected, int total, int page, int dir) {
+	if (page < 1) page = 1;
+	int new_sel = selected + dir * page;
+	if (new_sel < 0) new_sel = 0;
+	if (new_sel >= total) new_sel = total - 1;
+	return new_sel;
+}
+
+// Find the synthetic "Cheats" section's alphabetical position in cfg->sections[]
+static int find_cheats_section_index(EmuOvl* ovl) {
+	if (!ovl || !ovl->config) return -1;
+	for (int i = 0; i < ovl->config->section_count; i++)
+		if (strcmp(ovl->config->sections[i].name, "Cheats") == 0)
+			return i;
+	return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Save-slot screenshot helpers
+// ---------------------------------------------------------------------------
+
+static void get_slot_screenshot_path(EmuOvl* ovl, int slot, char* buf, int buf_size) {
+	// Match minarch format: <screenshot_dir>/<rom_file>.<slot>.bmp
+	snprintf(buf, buf_size, "%s/%s.%d.bmp", ovl->screenshot_dir, ovl->rom_file, slot);
+}
+
+static void write_resume_slot(EmuOvl* ovl, int slot) {
+	// Write resume slot file so game switcher knows which slot to show
+	// Format: <screenshot_dir>/<rom_file>.txt containing the slot number
+	char path[512];
+	snprintf(path, sizeof(path), "%s/%s.txt", ovl->screenshot_dir, ovl->rom_file);
+	FILE* f = fopen(path, "w");
+	if (f) {
+		fprintf(f, "%d", slot);
+		fclose(f);
+	}
+}
+
+static void load_slot_screenshots(EmuOvl* ovl) {
+	if (!ovl->render || !ovl->render->load_icon ||
+		ovl->screenshot_dir[0] == '\0' || ovl->rom_file[0] == '\0')
+		return;
+
+	// Target height: half screen (matches the preview area in render_main_menu)
+	int target_h = ovl->screen_h / 2;
+
+	for (int i = 0; i < EMU_OVL_MAX_SLOTS; i++) {
+		// Free old icon if loaded
+		if (ovl->slot_icons[i] >= 0 && ovl->render->free_icon) {
+			ovl->render->free_icon(ovl->slot_icons[i]);
+			ovl->slot_icons[i] = -1;
+		}
+		char path[512];
+		get_slot_screenshot_path(ovl, i, path, sizeof(path));
+		if (access(path, F_OK) == 0)
+			ovl->slot_icons[i] = ovl->render->load_icon(path, target_h);
+	}
+}
+
+static void free_slot_screenshots(EmuOvl* ovl) {
+	if (!ovl->render || !ovl->render->free_icon)
+		return;
+	for (int i = 0; i < EMU_OVL_MAX_SLOTS; i++) {
+		if (ovl->slot_icons[i] >= 0) {
+			ovl->render->free_icon(ovl->slot_icons[i]);
+			ovl->slot_icons[i] = -1;
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+int emu_ovl_init(EmuOvl* ovl, EmuOvlConfig* cfg, EmuOvlRenderBackend* render,
+				 const char* game_name, int screen_w, int screen_h) {
+	memset(ovl, 0, sizeof(*ovl));
+	ovl->config = cfg;
+	ovl->render = render;
+	ovl->state = EMU_OVL_STATE_CLOSED;
+	ovl->action = EMU_OVL_ACTION_NONE;
+	ovl->screen_w = screen_w;
+	ovl->screen_h = screen_h;
+
+	if (game_name)
+		snprintf(ovl->game_name, sizeof(ovl->game_name), "%s", game_name);
+
+	// Scale factor & outer padding — match NextUI per-platform:
+	//   tg5040 Brick (1024x768) → FIXED_SCALE=3, desktop platform's PADDING=5
+	//   tg5050 (1280x720)       → FIXED_SCALE=2, default PADDING=10
+	if (screen_w <= 1024) {
+		ovl_scale = 3;
+		ovl_padding = 5;
+	} else {
+		ovl_scale = 2;
+		ovl_padding = 10;
+	}
+
+	// Items per page: Brick = 5, Smart Pro / TG5050 = 9
+	if (screen_w <= 1024)
+		ovl->items_per_page = 5;
+	else
+		ovl->items_per_page = 8;
+
+	build_main_menu(ovl);
+
+	// Screenshot directory and ROM file for save state previews
+	ovl->screenshot_dir[0] = '\0';
+	ovl->rom_file[0] = '\0';
+	const char* ss_dir = getenv("EMU_OVERLAY_SCREENSHOT_DIR");
+	if (ss_dir && ss_dir[0] != '\0')
+		snprintf(ovl->screenshot_dir, sizeof(ovl->screenshot_dir), "%s", ss_dir);
+	else
+		snprintf(ovl->screenshot_dir, sizeof(ovl->screenshot_dir),
+				 "/mnt/SDCARD/Saves/screenshots/mupen64plus");
+	const char* rom_file = getenv("EMU_OVERLAY_ROMFILE");
+	if (rom_file && rom_file[0] != '\0') {
+		const char* base = strrchr(rom_file, '/');
+		base = base ? base + 1 : rom_file;
+		snprintf(ovl->rom_file, sizeof(ovl->rom_file), "%s", base);
+	}
+
+	// Init slot screenshot icons
+	for (int i = 0; i < EMU_OVL_MAX_SLOTS; i++)
+		ovl->slot_icons[i] = -1;
+
+	// Load button hint icons from embedded ARGB data
+	ovl->icon_a = -1;
+	ovl->icon_b = -1;
+	ovl->icon_dpad_h = -1;
+	if (render->load_icon_rgba) {
+		int icon_h = S(BUTTON_SIZE); // match NextUI's btn_sz = SCALE1(BUTTON_SIZE)
+		ovl->icon_a = render->load_icon_rgba(icon_a_data, ICON_A_W, ICON_A_H, icon_h);
+		ovl->icon_b = render->load_icon_rgba(icon_b_data, ICON_B_W, ICON_B_H, icon_h);
+		ovl->icon_dpad_h = render->load_icon_rgba(icon_dpad_h_data, ICON_DPAD_H_W, ICON_DPAD_H_H, icon_h);
+	}
+
+	// Note: caller is responsible for calling render->init() before emu_ovl_init
+	return 0;
+}
+
+void emu_ovl_open(EmuOvl* ovl) {
+	ovl->state = EMU_OVL_STATE_MAIN_MENU;
+	ovl->selected = 0;
+	ovl->action = EMU_OVL_ACTION_NONE;
+	ovl->action_param = 0;
+	ovl->save_slot = 0;
+	ovl->scroll_offset = 0;
+	ovl->bind_capture = -1;
+
+	if (ovl->render && ovl->render->capture_frame)
+		ovl->render->capture_frame();
+
+	// Pre-load all slot preview screenshots so they're ready before the
+	// user even highlights Save/Load (matches NextUI which loads on menu open).
+	load_slot_screenshots(ovl);
+}
+
+bool emu_ovl_update(EmuOvl* ovl, EmuOvlInput* input) {
+	if (ovl->state == EMU_OVL_STATE_CLOSED)
+		return false;
+
+	switch (ovl->state) {
+	// ----- MAIN MENU -----
+	case EMU_OVL_STATE_MAIN_MENU: {
+		// Inline slot cycling when Save or Load is highlighted (d-pad
+		// left/right, matching NextUI's minarch.c:8563-8587)
+		EmuOvlMainItemType sel_type = ovl->main_items[ovl->selected].type;
+		if (sel_type == EMU_OVL_MAIN_SAVE || sel_type == EMU_OVL_MAIN_LOAD) {
+			if (input->left) {
+				ovl->save_slot = (ovl->save_slot - 1 + EMU_OVL_MAX_SLOTS) % EMU_OVL_MAX_SLOTS;
+			} else if (input->right) {
+				ovl->save_slot = (ovl->save_slot + 1) % EMU_OVL_MAX_SLOTS;
+			}
+		}
+		if (input->up) {
+			ovl->selected = (ovl->selected - 1 + ovl->main_item_count) % ovl->main_item_count;
+		} else if (input->down) {
+			ovl->selected = (ovl->selected + 1) % ovl->main_item_count;
+		} else if (input->l1) {
+			ovl->selected = page_jump(ovl->selected, ovl->main_item_count, ovl->items_per_page, -1);
+		} else if (input->r1) {
+			ovl->selected = page_jump(ovl->selected, ovl->main_item_count, ovl->items_per_page, +1);
+		} else if (input->a) {
+			EmuOvlMainItemType t = ovl->main_items[ovl->selected].type;
+			switch (t) {
+			case EMU_OVL_MAIN_CONTINUE:
+				free_slot_screenshots(ovl);
+				ovl->action = EMU_OVL_ACTION_CONTINUE;
+				ovl->state = EMU_OVL_STATE_CLOSED;
+				return false;
+			case EMU_OVL_MAIN_SAVE:
+				free_slot_screenshots(ovl);
+				ovl->action = EMU_OVL_ACTION_SAVE_STATE;
+				ovl->action_param = ovl->save_slot;
+				ovl->state = EMU_OVL_STATE_CLOSED;
+				return false;
+			case EMU_OVL_MAIN_LOAD:
+				free_slot_screenshots(ovl);
+				ovl->action = EMU_OVL_ACTION_LOAD_STATE;
+				ovl->action_param = ovl->save_slot;
+				ovl->state = EMU_OVL_STATE_CLOSED;
+				return false;
+			case EMU_OVL_MAIN_OPTIONS:
+				ovl->state = EMU_OVL_STATE_SECTION_LIST;
+				ovl->selected = 0;
+				ovl->scroll_offset = 0;
+				ovl->current_section = 0;
+				break;
+			case EMU_OVL_MAIN_RESTART:
+				free_slot_screenshots(ovl);
+				ovl->action = EMU_OVL_ACTION_RESTART;
+				ovl->state = EMU_OVL_STATE_CLOSED;
+				return false;
+			case EMU_OVL_MAIN_QUIT:
+				free_slot_screenshots(ovl);
+				ovl->action = EMU_OVL_ACTION_QUIT;
+				ovl->state = EMU_OVL_STATE_CLOSED;
+				return false;
+			}
+		} else if (input->b || input->menu) {
+			free_slot_screenshots(ovl);
+			ovl->action = EMU_OVL_ACTION_CONTINUE;
+			ovl->state = EMU_OVL_STATE_CLOSED;
+			return false;
+		}
+		break;
+	}
+
+	// ----- SECTION LIST -----
+	case EMU_OVL_STATE_SECTION_LIST:
+		{
+		// +1 for "Save Changes" row at the bottom (matching NextUI's minarch
+		// which puts Save Changes as the last entry in its Options menu).
+		int total_entries = ovl->config->section_count + 1;
+		if (input->up) {
+			ovl->selected = (ovl->selected - 1 + total_entries) % total_entries;
+			ensure_scroll(ovl, total_entries);
+		} else if (input->down) {
+			ovl->selected = (ovl->selected + 1) % total_entries;
+			ensure_scroll(ovl, total_entries);
+		} else if (input->l1) {
+			ovl->selected = page_jump(ovl->selected, total_entries, ovl->items_per_page, -1);
+			ensure_scroll(ovl, total_entries);
+		} else if (input->r1) {
+			ovl->selected = page_jump(ovl->selected, total_entries, ovl->items_per_page, +1);
+			ensure_scroll(ovl, total_entries);
+		} else if (input->a) {
+			if (ovl->selected == ovl->config->section_count) {
+				// "Save Changes" row
+				ovl->state = EMU_OVL_STATE_SAVE_CHANGES;
+				ovl->selected = 0;
+				ovl->scroll_offset = 0;
+			} else {
+				EmuOvlSection* sec = &ovl->config->sections[ovl->selected];
+				if (strcmp(sec->name, "Cheats") == 0) {
+					ovl->state = EMU_OVL_STATE_CHEATS;
+				} else {
+					ovl->current_section = ovl->selected;
+					ovl->state = EMU_OVL_STATE_SECTION_ITEMS;
+				}
+				ovl->selected = 0;
+				ovl->scroll_offset = 0;
+			}
+		} else if (input->b) {
+			ovl->state = EMU_OVL_STATE_MAIN_MENU;
+			ovl->selected = find_options_index(ovl);
+		}
+		}
+		break;
+
+	// ----- SECTION ITEMS -----
+	case EMU_OVL_STATE_SECTION_ITEMS: {
+		// During bind capture, the main loop owns input — skip here
+		if (ovl->bind_capture >= 0)
+			break;
+		EmuOvlSection* sec = &ovl->config->sections[ovl->current_section];
+		bool is_input = (strcmp(sec->name, "Controls") == 0);
+		bool is_shortcuts = (strcmp(sec->name, "Shortcuts") == 0);
+		int remap_rows = is_input ? N64_REMAP_COUNT : 0;
+		int shortcut_rows = is_shortcuts ? SHORTCUT_COUNT : 0;
+		int total_rows = sec->item_count + remap_rows + shortcut_rows + 1; // items + [remaps|shortcuts] + reset
+		if (input->up) {
+			ovl->selected = (ovl->selected - 1 + total_rows) % total_rows;
+			ensure_scroll(ovl, total_rows);
+		} else if (input->down) {
+			ovl->selected = (ovl->selected + 1) % total_rows;
+			ensure_scroll(ovl, total_rows);
+		} else if (input->l1) {
+			ovl->selected = page_jump(ovl->selected, total_rows, ovl->items_per_page, -1);
+			ensure_scroll(ovl, total_rows);
+		} else if (input->r1) {
+			ovl->selected = page_jump(ovl->selected, total_rows, ovl->items_per_page, +1);
+			ensure_scroll(ovl, total_rows);
+		} else if (input->right || input->a) {
+			if (ovl->selected == total_rows - 1) {
+				// "Reset to Default" (last row)
+				emu_ovl_cfg_reset_section_to_defaults(sec);
+				if (is_input) {
+					N64ButtonMapping* mappings = emu_frontend_get_button_mappings();
+					for (int i = 0; i < N64_REMAP_COUNT; i++) {
+						mappings[i].physical = mappings[i].default_physical;
+						mappings[i].is_axis = mappings[i].default_is_axis;
+						mappings[i].axis_dir = mappings[i].default_axis_dir;
+						mappings[i].mod = 0;
+					}
+					emu_frontend_write_button_map_file();
+				}
+				if (is_shortcuts) {
+					ShortcutBinding* sc = emu_frontend_get_shortcuts();
+					for (int i = 0; i < SHORTCUT_COUNT; i++) {
+						sc[i].physical = -1;
+						sc[i].is_axis = 0;
+						sc[i].axis_dir = 0;
+						sc[i].mod = 0;
+					}
+				}
+			} else if (is_input && ovl->selected >= sec->item_count &&
+					   ovl->selected < sec->item_count + remap_rows) {
+				// Start bind capture for controls
+				ovl->bind_capture = ovl->selected - sec->item_count;
+				ovl->bind_capture_start = SDL_GetTicks();
+			} else if (is_shortcuts && ovl->selected >= sec->item_count &&
+					   ovl->selected < sec->item_count + shortcut_rows) {
+				// Start bind capture for shortcuts (1000 + index)
+				ovl->bind_capture = 1000 + (ovl->selected - sec->item_count);
+				ovl->bind_capture_start = SDL_GetTicks();
+			} else if (ovl->selected < sec->item_count && sec->item_count > 0) {
+				cycle_item_next(&sec->items[ovl->selected]);
+			}
+		} else if (input->left) {
+			if (ovl->selected < sec->item_count && sec->item_count > 0)
+				cycle_item_prev(&sec->items[ovl->selected]);
+		} else if (input->b) {
+			ovl->state = EMU_OVL_STATE_SECTION_LIST;
+			ovl->selected = ovl->current_section;
+			ovl->scroll_offset = 0;
+			ensure_scroll(ovl, ovl->config->section_count);
+		}
+		break;
+	}
+
+	case EMU_OVL_STATE_CHEATS: {
+		int count = ovl->cheat_cb.get_count ? ovl->cheat_cb.get_count() : 0;
+		if (input->b) {
+			ovl->state = EMU_OVL_STATE_SECTION_LIST;
+			int cheats_idx = find_cheats_section_index(ovl);
+			ovl->selected = (cheats_idx >= 0) ? cheats_idx : 0;
+			ovl->scroll_offset = 0;
+			ensure_scroll(ovl, ovl->config->section_count);
+		} else if (count == 0) {
+			break;
+		} else if (input->up) {
+			ovl->selected = (ovl->selected - 1 + count) % count;
+			ensure_scroll(ovl, count);
+		} else if (input->down) {
+			ovl->selected = (ovl->selected + 1) % count;
+			ensure_scroll(ovl, count);
+		} else if (input->l1) {
+			ovl->selected = page_jump(ovl->selected, count, ovl->items_per_page, -1);
+			ensure_scroll(ovl, count);
+		} else if (input->r1) {
+			ovl->selected = page_jump(ovl->selected, count, ovl->items_per_page, +1);
+			ensure_scroll(ovl, count);
+		} else if (input->right || input->a) {
+			if (ovl->cheat_cb.cycle_variant)
+				ovl->cheat_cb.cycle_variant(ovl->selected, 1);
+		} else if (input->left) {
+			if (ovl->cheat_cb.cycle_variant)
+				ovl->cheat_cb.cycle_variant(ovl->selected, -1);
+		}
+		break;
+	}
+
+	// ----- SAVE CHANGES submenu -----
+	case EMU_OVL_STATE_SAVE_CHANGES: {
+		// 3 items: Save for Console, Save for Game, Restore Defaults
+		int count = 3;
+		if (input->up) {
+			ovl->selected = (ovl->selected - 1 + count) % count;
+		} else if (input->down) {
+			ovl->selected = (ovl->selected + 1) % count;
+		} else if (input->a) {
+			switch (ovl->selected) {
+			case 0: ovl->action = EMU_OVL_ACTION_SAVE_CONSOLE; break;
+			case 1: ovl->action = EMU_OVL_ACTION_SAVE_GAME; break;
+			case 2: ovl->action = EMU_OVL_ACTION_RESTORE_DEFAULTS; break;
+			}
+			// Return to main menu after action — emu_frontend handles the write
+			ovl->state = EMU_OVL_STATE_MAIN_MENU;
+			ovl->selected = 0;
+			break;
+		} else if (input->b || input->menu) {
+			ovl->state = EMU_OVL_STATE_MAIN_MENU;
+			ovl->selected = 0;
+			break;
+		}
+		break;
+	}
+
+	case EMU_OVL_STATE_CLOSED:
+		return false;
+	}
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Rendering — settings-page style (matching NextUI's UI_renderSettingsPage)
+// ---------------------------------------------------------------------------
+
+// Pill-shaped rounded rect (radius = height/2). Delegates to the backend's
+// anti-aliased draw_rounded_rect implementation.
+static void draw_pill(EmuOvlRenderBackend* r, int x, int y, int w, int h,
+					  uint32_t color) {
+	if (r->draw_rounded_rect)
+		r->draw_rounded_rect(x, y, w, h, h / 2, color);
+	else
+		r->draw_rect(x, y, w, h, color);
+}
+
+// Compute vertically centered list_y for n items, reserving space for the
+// top title pill and the bottom footer pill.
+static int calc_centered_list_y(EmuOvl* ovl, int item_count) {
+	int reserved = PADDING_PX + S(PILL_SIZE) + PADDING_PX;
+	int top = reserved;
+	int bottom = ovl->screen_h - reserved;
+	int total_h = item_count * S(PILL_SIZE);
+	return top + (bottom - top - total_h) / 2;
+}
+
+// Draw text with a 1px black shadow for readability on game background
+static void draw_shadowed_text(EmuOvlRenderBackend* r, const char* text, int x, int y,
+							   uint32_t color, int font_id) {
+	r->draw_text(text, x + 1, y + 1, EMU_OVL_COLOR_BLACK, font_id);
+	r->draw_text(text, x, y, color, font_id);
+}
+
+// Strip ROM metadata from a game name: drop anything from the first " (" or
+// " [" so "Legend of Zelda, The - Ocarina of Time (U) (V1.2) [!]" becomes
+// "Legend of Zelda, The - Ocarina of Time". Truncates with "..." as a last
+// resort if the result still won't fit in max_w pixels.
+static void shorten_title(EmuOvlRenderBackend* r, const char* in, char* out,
+						  int out_size, int max_w) {
+	if (out_size <= 0)
+		return;
+	snprintf(out, out_size, "%s", in);
+	// Strip metadata
+	char* cut = strstr(out, " (");
+	char* cut2 = strstr(out, " [");
+	if (cut2 && (!cut || cut2 < cut))
+		cut = cut2;
+	if (cut)
+		*cut = '\0';
+	if (r->text_width(out, EMU_OVL_FONT_LARGE) <= max_w)
+		return;
+	// Still too long — truncate and append "..."
+	int len = (int)strlen(out);
+	while (len > 0) {
+		out[--len] = '\0';
+		char buf[256];
+		snprintf(buf, sizeof(buf), "%s...", out);
+		if (r->text_width(buf, EMU_OVL_FONT_LARGE) <= max_w) {
+			snprintf(out, out_size, "%s", buf);
+			return;
+		}
+	}
+}
+
+// Draw the title text at top-left (SpruceOS IGM style — plain text, no pill)
+static void draw_menu_bar(EmuOvl* ovl, const char* title) {
+	EmuOvlRenderBackend* r = ovl->render;
+	int pad = S(BUTTON_PADDING);
+
+	int x = PADDING_PX + pad;
+	int y = PADDING_PX + pad;
+
+	draw_shadowed_text(r, title, x, y,
+					   EMU_OVL_COLOR_WHITE, EMU_OVL_FONT_SMALL);
+}
+
+// Draw a button-hint group as plain text at the bottom of the screen.
+// Entries alternate: button_label, action_label, button_label, action_label, …
+// align_right = true → bottom-right anchored, else bottom-left.
+// Format: "B BACK    A OPEN" — button name in accent color, action in white.
+static void draw_button_group(EmuOvl* ovl, const char* hints[], int hint_count,
+							  bool align_right) {
+	EmuOvlRenderBackend* r = ovl->render;
+	int bm = S(BUTTON_MARGIN);
+	int font = EMU_OVL_FONT_SMALL;
+
+	// Pass 1: measure total width
+	int group_w = 0;
+	for (int i = 0; i < hint_count; i += 2) {
+		if (i > 0) group_w += bm * 2;
+		group_w += r->text_width(hints[i], font);
+		if (i + 1 < hint_count)
+			group_w += bm + r->text_width(hints[i + 1], font);
+	}
+	int x = align_right ? (ovl->screen_w - PADDING_PX - group_w) : PADDING_PX;
+	int y = ovl->screen_h - PADDING_PX - r->text_height(font);
+
+	// Pass 2: draw
+	int cx = x;
+	for (int i = 0; i < hint_count; i += 2) {
+		if (i > 0) cx += bm * 2;
+		// Button name in accent color
+		draw_shadowed_text(r, hints[i], cx, y, EMU_OVL_COLOR_ROW_SEL, font);
+		cx += r->text_width(hints[i], font);
+		if (i + 1 < hint_count) {
+			cx += bm;
+			// Action label in white
+			draw_shadowed_text(r, hints[i + 1], cx, y, EMU_OVL_COLOR_WHITE, font);
+			cx += r->text_width(hints[i + 1], font);
+		}
+	}
+}
+
+// Is this button a navigation hint (d-pad, L/R, etc.) that should go in the
+// left-aligned group, per NextUI's two-group footer convention?
+static bool is_nav_hint(const char* btn) {
+	return strcmp(btn, "D-PAD") == 0 ||
+		   strcmp(btn, "LEFT/RIGHT") == 0 ||
+		   strcmp(btn, "UP/DOWN") == 0 ||
+		   strcmp(btn, "L/R") == 0 ||
+		   strcmp(btn, "L1/R1") == 0;
+}
+
+// Draw the full bottom hint row, splitting the passed hints into two groups
+// per NextUI's convention (see e.g. battery.c:760 where GFX_blitButtonGroup is
+// called twice — nav hints left-aligned, action hints right-aligned):
+//   - Left pill:  navigation hints (d-pad, L/R, …). If none are passed we
+//                 fall back to POWER/SLEEP (the Quick Menu hardware hint).
+//   - Right pill: action hints (A, B, etc.)
+static void draw_footer_hints(EmuOvl* ovl, const char* hints[], int hint_count) {
+	const char* left[16];
+	const char* right[16];
+	int left_count = 0;
+	int right_count = 0;
+	for (int i = 0; i + 1 < hint_count; i += 2) {
+		if (is_nav_hint(hints[i])) {
+			if (left_count + 1 < (int)(sizeof(left) / sizeof(left[0]))) {
+				left[left_count++] = hints[i];
+				left[left_count++] = hints[i + 1];
+			}
+		} else {
+			if (right_count + 1 < (int)(sizeof(right) / sizeof(right[0]))) {
+				right[right_count++] = hints[i];
+				right[right_count++] = hints[i + 1];
+			}
+		}
+	}
+
+	if (left_count > 0)
+		draw_button_group(ovl, left, left_count, false);
+	if (right_count > 0)
+		draw_button_group(ovl, right, right_count, true);
+}
+
+// Draw a settings row (label on left, optional value on right)
+// Matches the visual style of UI_renderSettingsRow from ui_list.c
+static void draw_settings_row(EmuOvl* ovl, int x, int y, int w, int h,
+							  const char* label, const char* value,
+							  bool selected, bool cycleable, int label_font) {
+	EmuOvlRenderBackend* r = ovl->render;
+	int row_pad = S(BUTTON_PADDING);
+	int text_y_pos = y + (h - r->text_height(label_font)) / 2;
+
+	if (selected) {
+		// SpruceOS IGM style: flat golden bar behind selected item
+		if (value) {
+			// Settings row with value: golden bar full width
+			r->draw_rect(x, y, w, h, EMU_OVL_COLOR_ROW_SEL);
+			// Label text (cream on golden bar)
+			r->draw_text(label, x + row_pad, text_y_pos,
+						 EMU_OVL_COLOR_TEXT_SEL, label_font);
+			// Value text (cream, right-aligned, with arrows if cycleable)
+			char display[192];
+			if (cycleable)
+				snprintf(display, sizeof(display), "< %s >", value);
+			else
+				snprintf(display, sizeof(display), "%s", value);
+			int vw = r->text_width(display, EMU_OVL_FONT_TINY);
+			int val_x = x + w - row_pad - vw;
+			int val_y = y + (h - r->text_height(EMU_OVL_FONT_TINY)) / 2;
+			r->draw_text(display, val_x, val_y, EMU_OVL_COLOR_TEXT_SEL, EMU_OVL_FONT_TINY);
+		} else {
+			// Main menu item (no value): centered text with golden bar
+			int lw = r->text_width(label, label_font);
+			int bar_w = lw + row_pad * 2;
+			int bar_x = x + (w - bar_w) / 2;
+			r->draw_rect(bar_x, y, bar_w, h, EMU_OVL_COLOR_ROW_SEL);
+			int text_x = x + (w - lw) / 2;
+			r->draw_text(label, text_x, text_y_pos,
+						 EMU_OVL_COLOR_TEXT_SEL, label_font);
+		}
+	} else {
+		if (value) {
+			// Unselected settings row: text with shadow, left-aligned
+			draw_shadowed_text(r, label, x + row_pad, text_y_pos,
+							   EMU_OVL_COLOR_WHITE, label_font);
+			int vw = r->text_width(value, EMU_OVL_FONT_TINY);
+			int val_x = x + w - row_pad - vw;
+			int val_y = y + (h - r->text_height(EMU_OVL_FONT_TINY)) / 2;
+			draw_shadowed_text(r, value, val_x, val_y, EMU_OVL_COLOR_WHITE, EMU_OVL_FONT_TINY);
+		} else {
+			// Unselected main menu item: centered text with shadow
+			int lw = r->text_width(label, label_font);
+			int text_x = x + (w - lw) / 2;
+			draw_shadowed_text(r, label, text_x, text_y_pos,
+							   EMU_OVL_COLOR_WHITE, label_font);
+		}
+	}
+}
+
+static void draw_centered_text(EmuOvlRenderBackend* r, const char* text, int cx, int cy,
+							   uint32_t color, int font_id) {
+	int tw = r->text_width(text, font_id);
+	int th = r->text_height(font_id);
+	r->draw_text(text, cx - tw / 2, cy - th / 2, color, font_id);
+}
+
+static void render_main_menu(EmuOvl* ovl) {
+	EmuOvlRenderBackend* r = ovl->render;
+
+	draw_menu_bar(ovl, "spruceOS Menu");
+
+	int row_h = S(PILL_SIZE);
+	int content_x = PADDING_PX;
+	int content_w = ovl->screen_w - PADDING_PX * 2;
+
+	// Main menu always shows all items (no scrolling — it's a short fixed list)
+	int vis_count = ovl->main_item_count;
+	int list_y = calc_centered_list_y(ovl, vis_count);
+
+	// Only use left half for menu items (right half reserved for save preview)
+	int menu_w = ovl->screen_w / 2;
+
+	for (int i = 0; i < vis_count; i++) {
+		int iy = list_y + i * row_h;
+		bool sel = (i == ovl->selected);
+		draw_settings_row(ovl, content_x, iy, menu_w - PADDING_PX, row_h,
+						  ovl->main_items[i].label, NULL, sel, false,
+						  EMU_OVL_FONT_LARGE);
+	}
+
+	// Save state preview panel on the right when Save or Load is highlighted.
+	// Layout matches NextUI's minarch.c:8743-8788 exactly.
+	EmuOvlMainItemType sel_type = ovl->main_items[ovl->selected].type;
+	if (sel_type == EMU_OVL_MAIN_SAVE || sel_type == EMU_OVL_MAIN_LOAD) {
+#define WINDOW_RADIUS 4
+#define PAGINATION_HEIGHT 6
+
+		int hw = ovl->screen_w / 2;
+		int hh = ovl->screen_h / 2;
+		int pw = hw + S(WINDOW_RADIUS * 2);
+		int ph = hh + S(WINDOW_RADIUS * 2 + PAGINATION_HEIGHT + WINDOW_RADIUS);
+		int win_x = ovl->screen_w - pw - PADDING_PX;
+		int win_y = (ovl->screen_h - ph) / 2;
+
+		// White rounded window background (NextUI's ASSET_STATE_BG = RGB_WHITE)
+		if (r->draw_rounded_rect)
+			r->draw_rounded_rect(win_x, win_y, pw, ph, S(WINDOW_RADIUS),
+								 EMU_OVL_COLOR_WHITE);
+		else
+			r->draw_rect(win_x, win_y, pw, ph, EMU_OVL_COLOR_WHITE);
+
+		int img_x = win_x + S(WINDOW_RADIUS);
+		int img_y = win_y + S(WINDOW_RADIUS);
+
+		// Black fill behind the screenshot area
+		r->draw_rect(img_x, img_y, hw, hh, EMU_OVL_COLOR_BLACK);
+
+		// Screenshot or fallback text
+		int icon_id = ovl->slot_icons[ovl->save_slot];
+		if (icon_id >= 0 && r->draw_icon) {
+			r->draw_icon(icon_id, img_x, img_y);
+		} else {
+			draw_centered_text(r, "Empty Slot",
+							   img_x + hw / 2, img_y + hh / 2,
+							   EMU_OVL_COLOR_GRAY, EMU_OVL_FONT_LARGE);
+		}
+
+		// Pagination dots (centered horizontally in the window, below screenshot)
+		// Pagination dots — centered within the window using NextUI's exact
+		// formula: ox (= img_x) + (pw - SCALE1(15*SLOT_COUNT)) / 2
+		int dot_spacing = S(15);
+		int dots_total_w = dot_spacing * EMU_OVL_MAX_SLOTS;
+		int dots_x = img_x + (pw - dots_total_w) / 2;
+		int dots_y = img_y + hh + S(WINDOW_RADIUS);
+		for (int i = 0; i < EMU_OVL_MAX_SLOTS; i++) {
+			int dx = dots_x + i * dot_spacing;
+			if (i == ovl->save_slot) {
+				// Current slot: larger BLACK circle (6×6 unscaled)
+				draw_pill(r, dx, dots_y, S(6), S(6), EMU_OVL_COLOR_BLACK);
+			} else {
+				// Other slots: smaller circle (2×2 unscaled), offset +4px/+S(2)
+				// NextUI TRIAD_LIGHT_GRAY = 0x7F,0x7F,0x7F
+				draw_pill(r, dx + 4, dots_y + S(2), S(2), S(2), 0xFF7F7F7F);
+			}
+		}
+	}
+
+	// No footer hints — matches SpruceOS IGM clean style
+}
+
+static void render_section_list(EmuOvl* ovl) {
+	EmuOvlRenderBackend* r = ovl->render;
+
+	draw_menu_bar(ovl, "Options");
+
+	int row_h = S(PILL_SIZE);
+	int content_x = PADDING_PX;
+	int content_w = ovl->screen_w - PADDING_PX * 2;
+
+	// +1 for "Save Changes" row at the bottom
+	int total_count = ovl->config->section_count + 1;
+
+	// Scroll
+	ensure_scroll(ovl, total_count);
+
+	int vis_count = ovl->items_per_page;
+	if (vis_count > total_count)
+		vis_count = total_count;
+	int list_y = calc_centered_list_y(ovl, vis_count);
+
+	for (int vi = 0; vi < vis_count; vi++) {
+		int idx = ovl->scroll_offset + vi;
+		if (idx >= total_count)
+			break;
+
+		int iy = list_y + vi * row_h;
+		bool sel = (idx == ovl->selected);
+		const char* name;
+		if (idx < ovl->config->section_count)
+			name = ovl->config->sections[idx].name;
+		else
+			name = "Save Changes";
+		draw_settings_row(ovl, content_x, iy, content_w, row_h,
+						  name, NULL, sel, false, EMU_OVL_FONT_LARGE);
+	}
+
+	// Optional hint (e.g. "Restart game to apply changes")
+	if (ovl->config->options_hint[0] != '\0') {
+		int hint_y = list_y + vis_count * row_h + S(4);
+		int tw = r->text_width(ovl->config->options_hint, EMU_OVL_FONT_TINY);
+		r->draw_text(ovl->config->options_hint,
+					 (ovl->screen_w - tw) / 2, hint_y,
+					 EMU_OVL_COLOR_GRAY, EMU_OVL_FONT_TINY);
+	}
+
+	const char* hints[] = {"B", "BACK", "A", "OPEN"};
+	draw_footer_hints(ovl, hints, 4);
+}
+
+static void render_section_items(EmuOvl* ovl) {
+	EmuOvlRenderBackend* r = ovl->render;
+	EmuOvlSection* sec = &ovl->config->sections[ovl->current_section];
+
+	draw_menu_bar(ovl, sec->name);
+
+	int row_h = S(PILL_SIZE);
+	int items_per_page = ovl->items_per_page;
+	int list_y = calc_centered_list_y(ovl, items_per_page);
+	int content_x = PADDING_PX;
+	int content_w = ovl->screen_w - PADDING_PX * 2;
+
+	bool is_input = (strcmp(sec->name, "Controls") == 0);
+	bool is_shortcuts = (strcmp(sec->name, "Shortcuts") == 0);
+	int remap_rows = is_input ? N64_REMAP_COUNT : 0;
+	int shortcut_rows = is_shortcuts ? SHORTCUT_COUNT : 0;
+	int total_rows = sec->item_count + remap_rows + shortcut_rows + 1;
+
+	// Scroll
+	ensure_scroll(ovl, total_rows);
+
+	int vis_count = items_per_page;
+	if (vis_count > total_rows)
+		vis_count = total_rows;
+
+	N64ButtonMapping* mappings = is_input ? emu_frontend_get_button_mappings() : NULL;
+	ShortcutBinding* shortcuts = is_shortcuts ? emu_frontend_get_shortcuts() : NULL;
+
+	for (int vi = 0; vi < vis_count; vi++) {
+		int idx = ovl->scroll_offset + vi;
+		if (idx >= total_rows)
+			break;
+
+		int iy = list_y + vi * row_h;
+		bool sel = (idx == ovl->selected);
+
+		if (idx < sec->item_count) {
+			// Normal config item
+			EmuOvlItem* item = &sec->items[idx];
+			char val_buf[64];
+			const char* val_str = get_item_display_value(item, val_buf, sizeof(val_buf));
+			draw_settings_row(ovl, content_x, iy, content_w, row_h,
+							  item->label, val_str, sel, true,
+							  EMU_OVL_FONT_SMALL);
+		} else if (is_input && idx < sec->item_count + remap_rows) {
+			// Button remap row
+			int ri = idx - sec->item_count;
+			const char* val;
+			char countdown_buf[16];
+			if (ovl->bind_capture == ri) {
+				unsigned int elapsed = SDL_GetTicks() - ovl->bind_capture_start;
+				if (elapsed < 500) {
+					val = "...";
+				} else {
+					int remaining = (int)(5500 - elapsed) / 1000 + 1;
+					if (remaining < 1) remaining = 1;
+					if (remaining > 5) remaining = 5;
+					snprintf(countdown_buf, sizeof(countdown_buf), "%d...", remaining);
+					val = countdown_buf;
+				}
+			} else {
+				val = emu_frontend_binding_label(&mappings[ri]);
+			}
+			draw_settings_row(ovl, content_x, iy, content_w, row_h,
+							  mappings[ri].name, val, sel, false,
+							  EMU_OVL_FONT_SMALL);
+		} else if (is_shortcuts && idx >= sec->item_count &&
+				   idx < sec->item_count + shortcut_rows) {
+			// Shortcut binding row
+			int si = idx - sec->item_count;
+			const char* val;
+			char countdown_buf[16];
+			int bc_idx = ovl->bind_capture - 1000;
+			if (ovl->bind_capture >= 1000 && bc_idx == si) {
+				unsigned int elapsed = SDL_GetTicks() - ovl->bind_capture_start;
+				if (elapsed < 500) {
+					val = "...";
+				} else {
+					int remaining = (int)(5500 - elapsed) / 1000 + 1;
+					if (remaining < 1) remaining = 1;
+					if (remaining > 5) remaining = 5;
+					snprintf(countdown_buf, sizeof(countdown_buf), "%d...", remaining);
+					val = countdown_buf;
+				}
+			} else {
+				val = emu_frontend_shortcut_label(&shortcuts[si]);
+			}
+			draw_settings_row(ovl, content_x, iy, content_w, row_h,
+							  shortcuts[si].label, val, sel, false,
+							  EMU_OVL_FONT_SMALL);
+		} else {
+			// "Reset to Default" row (last)
+			draw_settings_row(ovl, content_x, iy, content_w, row_h,
+							  "Reset to Default", NULL, sel, false,
+							  EMU_OVL_FONT_SMALL);
+		}
+	}
+
+	// Description for selected item / hint text area
+	int desc_y = list_y + vis_count * row_h;
+	int desc_cy = desc_y + row_h / 2 - r->text_height(EMU_OVL_FONT_TINY) / 2;
+
+	if (ovl->selected < sec->item_count) {
+		EmuOvlItem* sel_item = &sec->items[ovl->selected];
+		if (sel_item->description[0] != '\0') {
+			int tw = r->text_width(sel_item->description, EMU_OVL_FONT_TINY);
+			r->draw_text(sel_item->description,
+						 (ovl->screen_w - tw) / 2, desc_cy,
+						 EMU_OVL_COLOR_GRAY, EMU_OVL_FONT_TINY);
+		}
+	}
+
+	const char* hints[] = {"D-PAD", "CHANGE", "B", "BACK"};
+	draw_footer_hints(ovl, hints, 4);
+}
+
+static void render_cheats(EmuOvl* ovl) {
+	EmuOvlRenderBackend* r = ovl->render;
+	draw_menu_bar(ovl, "Cheats");
+
+	int count = ovl->cheat_cb.get_count ? ovl->cheat_cb.get_count() : 0;
+
+	if (count == 0) {
+		draw_centered_text(r, "No cheats available", ovl->screen_w / 2,
+						   ovl->screen_h / 2, EMU_OVL_COLOR_GRAY, EMU_OVL_FONT_SMALL);
+		const char* hints[] = {"B", "BACK"};
+		draw_footer_hints(ovl, hints, 2);
+		return;
+	}
+
+	int row_h = S(PILL_SIZE);
+	int items_per_page = ovl->items_per_page;
+	int list_y = calc_centered_list_y(ovl, items_per_page);
+	int content_x = PADDING_PX;
+	int content_w = ovl->screen_w - PADDING_PX * 2;
+
+	// Scroll
+	ensure_scroll(ovl, count);
+
+	int vis_count = items_per_page;
+	if (vis_count > count)
+		vis_count = count;
+
+	for (int vi = 0; vi < vis_count; vi++) {
+		int idx = ovl->scroll_offset + vi;
+		if (idx >= count)
+			break;
+
+		int iy = list_y + vi * row_h;
+		bool sel = (idx == ovl->selected);
+
+		const char* name = ovl->cheat_cb.get_name ? ovl->cheat_cb.get_name(idx) : "???";
+		const char* val = ovl->cheat_cb.get_value_label ? ovl->cheat_cb.get_value_label(idx) : "OFF";
+		draw_settings_row(ovl, content_x, iy, content_w, row_h,
+						  name, val, sel, true, EMU_OVL_FONT_SMALL);
+	}
+
+	// Description for selected cheat (inline, matching settings pattern)
+	int desc_y = list_y + vis_count * row_h;
+	int desc_cy = desc_y + row_h / 2 - r->text_height(EMU_OVL_FONT_TINY) / 2;
+	const char* desc = ovl->cheat_cb.get_description ? ovl->cheat_cb.get_description(ovl->selected) : NULL;
+	if (desc && desc[0] != '\0') {
+		int tw = r->text_width(desc, EMU_OVL_FONT_TINY);
+		r->draw_text(desc, (ovl->screen_w - tw) / 2, desc_cy,
+					 EMU_OVL_COLOR_GRAY, EMU_OVL_FONT_TINY);
+	}
+
+	const char* hints[] = {"D-PAD", "CHANGE", "B", "BACK"};
+	draw_footer_hints(ovl, hints, 4);
+}
+
+static const char* scope_label(EmuConfigScope scope) {
+	switch (scope) {
+	case EMU_SCOPE_NONE:    return "Using defaults.";
+	case EMU_SCOPE_CONSOLE: return "Using console config.";
+	case EMU_SCOPE_GAME:    return "Using game config.";
+	}
+	return "";
+}
+
+static void render_save_changes(EmuOvl* ovl) {
+	EmuOvlRenderBackend* r = ovl->render;
+
+	draw_menu_bar(ovl, "Save Changes");
+
+	// Scope indicator below the title
+	const char* desc = scope_label(ovl->scope);
+	int desc_tw = r->text_width(desc, EMU_OVL_FONT_TINY);
+	int title_pill_h = S(PILL_SIZE);
+	int desc_y = PADDING_PX + title_pill_h + S(2);
+	r->draw_text(desc, PADDING_PX + S(BUTTON_PADDING), desc_y,
+				 EMU_OVL_COLOR_GRAY, EMU_OVL_FONT_TINY);
+
+	// 3 rows: Save for Console, Save for Game, Restore Defaults
+	static const char* items[] = {
+		"Save for Console", "Save for Game", "Restore Defaults"
+	};
+	int row_h = S(PILL_SIZE);
+	int content_x = PADDING_PX;
+	int content_w = ovl->screen_w - PADDING_PX * 2;
+	int list_y = calc_centered_list_y(ovl, 3);
+
+	for (int i = 0; i < 3; i++) {
+		int iy = list_y + i * row_h;
+		bool sel = (i == ovl->selected);
+		draw_settings_row(ovl, content_x, iy, content_w, row_h,
+						  items[i], NULL, sel, false, EMU_OVL_FONT_LARGE);
+	}
+
+	const char* hints[] = {"B", "BACK", "A", "OKAY"};
+	draw_footer_hints(ovl, hints, 4);
+}
+
+void emu_ovl_render(EmuOvl* ovl) {
+	if (ovl->state == EMU_OVL_STATE_CLOSED)
+		return;
+
+	EmuOvlRenderBackend* r = ovl->render;
+	if (!r)
+		return;
+
+	r->begin_frame();
+	r->draw_captured_frame(0.1f);
+
+	switch (ovl->state) {
+	case EMU_OVL_STATE_MAIN_MENU:
+		render_main_menu(ovl);
+		break;
+	case EMU_OVL_STATE_SECTION_LIST:
+		render_section_list(ovl);
+		break;
+	case EMU_OVL_STATE_SECTION_ITEMS:
+		render_section_items(ovl);
+		break;
+	case EMU_OVL_STATE_CHEATS:
+		render_cheats(ovl);
+		break;
+	case EMU_OVL_STATE_SAVE_CHANGES:
+		render_save_changes(ovl);
+		break;
+	case EMU_OVL_STATE_CLOSED:
+		break;
+	}
+
+	r->end_frame();
+}
+
+bool emu_ovl_is_active(EmuOvl* ovl) {
+	return ovl->state != EMU_OVL_STATE_CLOSED;
+}
+
+EmuOvlAction emu_ovl_get_action(EmuOvl* ovl) {
+	return ovl->action;
+}
+
+int emu_ovl_get_action_param(EmuOvl* ovl) {
+	return ovl->action_param;
+}
+
+int emu_ovl_save_slot_screenshot(EmuOvl* ovl, int slot) {
+	if (!ovl || !ovl->render || !ovl->render->save_captured_frame)
+		return -1;
+	if (slot < 0 || slot >= EMU_OVL_MAX_SLOTS)
+		return -1;
+	if (ovl->screenshot_dir[0] == '\0' || ovl->rom_file[0] == '\0')
+		return -1;
+
+	char path[512];
+	get_slot_screenshot_path(ovl, slot, path, sizeof(path));
+	int ret = ovl->render->save_captured_frame(path);
+
+	// Write resume slot file for game switcher
+	if (ret == 0)
+		write_resume_slot(ovl, slot);
+
+	return ret;
+}
