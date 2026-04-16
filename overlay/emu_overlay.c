@@ -708,13 +708,8 @@ static void draw_footer_hints(EmuOvl* ovl, const char* hints[], int hint_count) 
 		}
 	}
 
-	if (left_count == 0) {
-		// Quick-Menu style: no nav hints, so show the POWER/SLEEP hardware hint
-		const char* power_hint[] = {"POWER", "SLEEP"};
-		draw_button_group(ovl, power_hint, 2, false);
-	} else {
+	if (left_count > 0)
 		draw_button_group(ovl, left, left_count, false);
-	}
 	if (right_count > 0)
 		draw_button_group(ovl, right, right_count, true);
 }
@@ -1141,7 +1136,7 @@ void emu_ovl_render(EmuOvl* ovl) {
 		return;
 
 	r->begin_frame();
-	r->draw_captured_frame(0.2f);
+	r->draw_captured_frame(0.1f);
 
 	switch (ovl->state) {
 	case EMU_OVL_STATE_MAIN_MENU:
