@@ -1195,9 +1195,9 @@ static EmuOvlInput poll_overlay_input(void) {
 
 	// Buttons — edge detect: only trigger on newly-pressed buttons
 	// SDL button indices: 0=A(hw), 1=B(hw), 4=L1, 5=R1
-	static const int btnMap[] = {0, 1, 4, 5};
+	static const int btnMap[] = {0, 1, 4, 5, 10, 11, 12, 13};
 	Uint32 curButtons = 0;
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < 8; i++) {
 		if (SDL_JoystickGetButton(s_joy, btnMap[i]))
 			curButtons |= (1u << btnMap[i]);
 	}
