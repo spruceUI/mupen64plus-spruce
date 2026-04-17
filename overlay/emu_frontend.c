@@ -1204,6 +1204,11 @@ static EmuOvlInput poll_overlay_input(void) {
 	Uint32 btnPressed = curButtons & ~s_prevButtons;
 	s_prevButtons = curButtons;
 
+	if (btnPressed & (1u << 10)) input.up    = true;
+	if (btnPressed & (1u << 11)) input.down  = true;
+	if (btnPressed & (1u << 12)) input.left  = true;
+	if (btnPressed & (1u << 13)) input.right = true;
+
 	if (btnPressed & (1u << 0)) input.b    = true;
 	if (btnPressed & (1u << 1)) input.a    = true;
 	if (btnPressed & (1u << 4)) input.l1   = true;
