@@ -254,12 +254,16 @@ int emu_ovl_init(EmuOvl* ovl, EmuOvlConfig* cfg, EmuOvlRenderBackend* render,
 	// Scale factor & outer padding — match NextUI per-platform:
 	//   tg5040 Brick (1024x768) → FIXED_SCALE=3, desktop platform's PADDING=5
 	//   tg5050 (1280x720)       → FIXED_SCALE=2, default PADDING=10
-	if (screen_w <= 1024) {
+	//   Flip and other small screens (e.g. 640x480) → FIXED_SCALE=2, PADDING=5
+	if (screen_w >= 1280) {
+		ovl_scale = 2;
+		ovl_padding = 10;
+	} else if (screen_w >= 1024 && screen_h >= 720) {
 		ovl_scale = 3;
 		ovl_padding = 5;
 	} else {
 		ovl_scale = 2;
-		ovl_padding = 10;
+		ovl_padding = 5;
 	}
 
 	// Items per page: Brick = 5, Smart Pro / TG5050 = 9

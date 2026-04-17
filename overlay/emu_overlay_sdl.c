@@ -194,8 +194,9 @@ static int ovl_sdl_init(int screen_w, int screen_h) {
 	s_screenH = screen_h;
 
 	// Scale factor: match NextUI's FIXED_SCALE
-	// Brick (1024x768) = 3x, Smart Pro / TG5050 (1280x720) = 2x
-	if (screen_w <= 1024)
+	// Brick (1024x768) = 3x, Smart Pro / TG5050 (1280x720) = 2x,
+	// Flip and other small screens (e.g. 640x480) = 2x
+	if (screen_w >= 1024 && screen_h >= 720)
 		s_scale = 3;
 	else
 		s_scale = 2;
