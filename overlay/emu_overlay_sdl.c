@@ -198,7 +198,7 @@ static int ovl_sdl_init(int screen_w, int screen_h) {
 	if (screen_w <= 1024)
 		s_scale = 3;
 	else
-		s_scale = 1;
+		s_scale = 2;
 
 	// Initialize SDL_ttf
 	if (!TTF_WasInit()) {
