@@ -7,7 +7,7 @@ CROSS=aarch64-linux-gnu
 
 export CC=${CROSS}-gcc
 export CXX=${CROSS}-g++
-export AR=${CROSS}-ar
+export AR=${CROSS}-gcc-ar
 export STRIP=${CROSS}-strip
 export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
 export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig
