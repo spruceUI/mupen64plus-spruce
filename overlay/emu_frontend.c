@@ -53,6 +53,55 @@ static Uint32 s_prevButtons = 0;
 static int s_prevAxisX = 0;
 static int s_prevAxisY = 0;
 
+// Raw SDL joystick indices the overlay itself navigates with. Defaults are the
+// X360-style numbering udev SDL2 gives every other device. Pads that enumerate
+// differently (Anbernic XX on the mali SDL2: A b3, B b4, L1 b7, R1 b8, SELECT
+// b9, MENU b11) override them through
+//   EMU_OVERLAY_BTNMAP="a=3,b=4,l1=7,r1=8,menu=11,select=9,up=-1,down=-1,left=-1,right=-1"
+// (-1 unbinds) and name the buttons for the remap screen through
+//   EMU_OVERLAY_BTNLABELS="Esc,Vol-,Vol+,A,B,Y,X,L1,R1,Select,Start,Menu,L2,R2"
+// (comma separated, indexed by raw button number).
+static int s_ovlBtnA = 1, s_ovlBtnB = 0, s_ovlBtnL1 = 4, s_ovlBtnR1 = 5;
+static int s_ovlBtnUp = 10, s_ovlBtnDown = 11, s_ovlBtnLeft = 12, s_ovlBtnRight = 13;
+static int s_modBtnMenu = 8, s_modBtnSelect = 6;
+#define OVL_MAX_BTNS 16
+static char s_btnLabelsBuf[256];
+static const char* s_btnLabelsEnv[OVL_MAX_BTNS];
+
+static void overlay_init_buttons(void) {
+	const char* map = getenv("EMU_OVERLAY_BTNMAP");
+	if (map && map[0] != '\0') {
+		char buf[256];
+		strncpy(buf, map, sizeof(buf) - 1);
+		buf[sizeof(buf) - 1] = '\0';
+		for (char* tok = strtok(buf, ", "); tok; tok = strtok(NULL, ", ")) {
+			char* eq = strchr(tok, '=');
+			if (!eq) continue;
+			*eq = '\0';
+			int v = atoi(eq + 1);
+			if (v >= OVL_MAX_BTNS) continue;
+			if      (!strcmp(tok, "a"))      s_ovlBtnA = v;
+			else if (!strcmp(tok, "b"))      s_ovlBtnB = v;
+			else if (!strcmp(tok, "l1"))     s_ovlBtnL1 = v;
+			else if (!strcmp(tok, "r1"))     s_ovlBtnR1 = v;
+			else if (!strcmp(tok, "up"))     s_ovlBtnUp = v;
+			else if (!strcmp(tok, "down"))   s_ovlBtnDown = v;
+			else if (!strcmp(tok, "left"))   s_ovlBtnLeft = v;
+			else if (!strcmp(tok, "right"))  s_ovlBtnRight = v;
+			else if (!strcmp(tok, "menu"))   s_modBtnMenu = v;
+			else if (!strcmp(tok, "select")) s_modBtnSelect = v;
+		}
+	}
+	const char* labels = getenv("EMU_OVERLAY_BTNLABELS");
+	if (labels && labels[0] != '\0') {
+		strncpy(s_btnLabelsBuf, labels, sizeof(s_btnLabelsBuf) - 1);
+		s_btnLabelsBuf[sizeof(s_btnLabelsBuf) - 1] = '\0';
+		int i = 0;
+		for (char* tok = strtok(s_btnLabelsBuf, ","); tok && i < OVL_MAX_BTNS; tok = strtok(NULL, ","))
+			s_btnLabelsEnv[i++] = tok;
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Frame skip (configurable via overlay menu)
 // ---------------------------------------------------------------------------
@@ -101,9 +150,15 @@ static const char* s_btnLabels[] = {
 	"L3/F1", "R3/F2", NULL
 };
 
+static const char* btn_label(int idx) {
+	if (idx < 0 || idx >= OVL_MAX_BTNS) return "?";
+	if (s_btnLabelsEnv[idx]) return s_btnLabelsEnv[idx];
+	return idx < 11 ? s_btnLabels[idx] : "?";
+}
+
 static const char* mod_label(int mod) {
-	if (mod == 8) return "MENU";
-	if (mod == 6) return "SELECT";
+	if (mod == s_modBtnMenu) return "MENU";
+	if (mod == s_modBtnSelect) return "SELECT";
 	if (mod == -3) return "L2";   // -(axis_id + 1)
 	if (mod == -6) return "R2";
 	return "MOD";
@@ -118,7 +173,7 @@ const char* emu_frontend_binding_label(const N64ButtonMapping* m) {
 		snprintf(axis_buf, sizeof(axis_buf), "Axis %d%s", m->physical, m->axis_dir > 0 ? "+" : "-");
 		base = axis_buf;
 	} else {
-		base = (m->physical >= 0 && m->physical < 11) ? s_btnLabels[m->physical] : "?";
+		base = btn_label(m->physical);
 	}
 	if (m->mod != 0) {
 		snprintf(buf, sizeof(buf), "%s+%s", mod_label(m->mod), base);
@@ -271,7 +326,7 @@ void emu_frontend_update_buttons(void) {
 	s_btnState = 0;
 	memcpy(s_axisPrev, s_axisState, sizeof(s_axisPrev));
 	if (!s_joy) return;
-	for (int b = 0; b <= 10; b++)
+	for (int b = 0; b < OVL_MAX_BTNS; b++)
 		if (SDL_JoystickGetButton(s_joy, b))
 			s_btnState |= (1u << b);
 	int na = SDL_JoystickNumAxes(s_joy);
@@ -334,7 +389,7 @@ const char* emu_frontend_shortcut_label(const ShortcutBinding* s) {
 				 s->physical, s->axis_dir > 0 ? "+" : "-");
 		base = axis_buf;
 	} else {
-		base = (s->physical >= 0 && s->physical < 11) ? s_btnLabels[s->physical] : "?";
+		base = btn_label(s->physical);
 	}
 	if (s->mod != 0) {
 		snprintf(buf, sizeof(buf), "%s+%s", mod_label(s->mod), base);
@@ -1000,6 +1055,7 @@ static void process_aspect_shortcut(void) {
 // ---------------------------------------------------------------------------
 
 static void overlay_init_paths(void) {
+	overlay_init_buttons();
 	// Env vars override auto-derived paths.
 	const char* json = getenv("EMU_OVERLAY_JSON");
 	const char* ini  = getenv("EMU_OVERLAY_INI");
@@ -1194,25 +1250,27 @@ static EmuOvlInput poll_overlay_input(void) {
 	s_prevAxisY = axisY;
 
 	// Buttons — edge detect: only trigger on newly-pressed buttons
-	// SDL button indices: 0=A(hw), 1=B(hw), 4=L1, 5=R1
-	static const int btnMap[] = {0, 1, 4, 5, 10, 11, 12, 13};
+	const int btnMap[] = {s_ovlBtnB, s_ovlBtnA, s_ovlBtnL1, s_ovlBtnR1,
+	                      s_ovlBtnUp, s_ovlBtnDown, s_ovlBtnLeft, s_ovlBtnRight};
 	Uint32 curButtons = 0;
 	for (int i = 0; i < 8; i++) {
-		if (SDL_JoystickGetButton(s_joy, btnMap[i]))
+		if (btnMap[i] >= 0 && SDL_JoystickGetButton(s_joy, btnMap[i]))
 			curButtons |= (1u << btnMap[i]);
 	}
 	Uint32 btnPressed = curButtons & ~s_prevButtons;
 	s_prevButtons = curButtons;
+	#define OVL_PRESSED(b) ((b) >= 0 && (btnPressed & (1u << (b))))
 
-	if (btnPressed & (1u << 10)) input.up    = true;
-	if (btnPressed & (1u << 11)) input.down  = true;
-	if (btnPressed & (1u << 12)) input.left  = true;
-	if (btnPressed & (1u << 13)) input.right = true;
+	if (OVL_PRESSED(s_ovlBtnUp))    input.up    = true;
+	if (OVL_PRESSED(s_ovlBtnDown))  input.down  = true;
+	if (OVL_PRESSED(s_ovlBtnLeft))  input.left  = true;
+	if (OVL_PRESSED(s_ovlBtnRight)) input.right = true;
 
-	if (btnPressed & (1u << 0)) input.b    = true;
-	if (btnPressed & (1u << 1)) input.a    = true;
-	if (btnPressed & (1u << 4)) input.l1   = true;
-	if (btnPressed & (1u << 5)) input.r1   = true;
+	if (OVL_PRESSED(s_ovlBtnB))  input.b    = true;
+	if (OVL_PRESSED(s_ovlBtnA))  input.a    = true;
+	if (OVL_PRESSED(s_ovlBtnL1)) input.l1   = true;
+	if (OVL_PRESSED(s_ovlBtnR1)) input.r1   = true;
+	#undef OVL_PRESSED
 
 	// Menu signal: SIGUSR2 from homebutton_watchdog
 	if (g_OpenOverlay) {
@@ -1252,9 +1310,9 @@ static EmuOvlAction run_overlay_loop(void) {
 	s_prevAxisX = SDL_JoystickGetAxis(s_joy, 0);
 	s_prevAxisY = SDL_JoystickGetAxis(s_joy, 1);
 	s_prevButtons = 0;
-	static const int menu_btns[] = {0, 1, 4, 5};
+	const int menu_btns[] = {s_ovlBtnB, s_ovlBtnA, s_ovlBtnL1, s_ovlBtnR1};
 	for (int i = 0; i < 4; i++) {
-		if (SDL_JoystickGetButton(s_joy, menu_btns[i]))
+		if (menu_btns[i] >= 0 && SDL_JoystickGetButton(s_joy, menu_btns[i]))
 			s_prevButtons |= (1u << menu_btns[i]);
 	}
 	SDL_Event ev;
@@ -1350,8 +1408,8 @@ static EmuOvlAction run_overlay_loop(void) {
 				// MENU: always modifier-only.
 				// SELECT/L2/R2: dual-purpose — modifier if a combo button
 				// is pressed, standalone after a grace period if not.
-				#define MOD_BTN_MENU   8
-				#define MOD_BTN_SELECT 6
+				#define MOD_BTN_MENU   s_modBtnMenu
+				#define MOD_BTN_SELECT s_modBtnSelect
 				#define MOD_AXIS_L2    2
 				#define MOD_AXIS_R2    5
 				int held_mod = 0;
