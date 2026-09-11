@@ -38,7 +38,13 @@ echo "=== Building Mupen64Plus for aarch64 ==="
 # Clone all components
 clone() {
     local repo=$1 dir=$2 ref=${3:-$MUPEN_VERSION}
-    if [ ! -d "$dir" ]; then
+    [ -d "$dir" ] && return
+    if [ ${#ref} -eq 40 ] && [ -z "$(printf %s "$ref" | tr -d 0-9a-f)" ]; then
+        # A commit sha: --branch cannot take one, fetch it directly.
+        git init -q "$dir"
+        git -C "$dir" fetch --depth 1 "https://github.com/$repo.git" "$ref"
+        git -C "$dir" checkout -q FETCH_HEAD
+    else
         git clone --depth 1 --branch "$ref" "https://github.com/$repo.git" "$dir"
     fi
 }
@@ -50,7 +56,9 @@ clone mupen64plus/mupen64plus-input-sdl     input-sdl
 clone mupen64plus/mupen64plus-rsp-hle       rsp-hle
 clone mupen64plus/mupen64plus-video-rice    video-rice
 clone mupen64plus/mupen64plus-video-glide64mk2 video-glide64mk2
-clone gonetz/GLideN64                       video-gliden64 master
+# GLideN64 master as of the last green build (2026-04-18). Newer master needs
+# zstd (FIND_PACKAGE(ZSTD) in GLideNHQ), which the 20.04 image does not have.
+clone gonetz/GLideN64                       video-gliden64 c8ef81c7d9aede9f67f6ed3d3426c90541f9f13e
 
 # Apply patches
 echo "=== Applying patches ==="
