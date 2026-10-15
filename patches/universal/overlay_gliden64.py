@@ -48,10 +48,11 @@ include_directories(/overlay /overlay/cjson)''',
     1
 )
 
-# Add SDL2_ttf and dl to link flags via the EGL_LIB variable (our builds always use EGL)
+# Link what the overlay calls (gl*, SDL_*, TTF_*) via EGL_LIB (our builds always use EGL): only Mali's
+# libEGL carries gl*, so without GLESv2 the plugin cannot load on PowerVR or Mesa
 cm = cm.replace(
     '  set(OPENGL_LIBRARIES ${EGL_LIB})',
-    '  set(OPENGL_LIBRARIES ${EGL_LIB} SDL2_ttf dl)',
+    '  set(OPENGL_LIBRARIES ${EGL_LIB} GLESv2 SDL2 SDL2_ttf dl)',
     1
 )
 

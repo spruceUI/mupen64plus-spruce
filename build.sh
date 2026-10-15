@@ -93,6 +93,7 @@ m64p_make video-glide64mk2/projects/unix
 echo "=== Building GLideN64 ==="
 mkdir -p video-gliden64/src/build
 cd video-gliden64/src/build
+# --no-undefined: a symbol with no linked provider fails here, not in the device's dlopen
 cmake .. \
     -DCMAKE_C_COMPILER=${CROSS}-gcc \
     -DCMAKE_CXX_COMPILER=${CROSS}-g++ \
@@ -105,7 +106,7 @@ cmake .. \
     -DCMAKE_C_FLAGS="${OPTFLAGS}" \
     -DCMAKE_CXX_FLAGS="${OPTFLAGS}" \
     -DCMAKE_EXE_LINKER_FLAGS="${LDFLAGS}" \
-    -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS}"
+    -DCMAKE_SHARED_LINKER_FLAGS="${LDFLAGS} -Wl,--no-undefined"
 make -j$(nproc)
 cd /build
 
