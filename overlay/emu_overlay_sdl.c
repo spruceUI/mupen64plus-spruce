@@ -175,7 +175,9 @@ static GLuint link_program(GLuint vs, GLuint fs) {
 // init / destroy
 // ---------------------------------------------------------------------------
 
-static int ovl_sdl_init(int screen_w, int screen_h) {
+static void ovl_sdl_destroy(void);
+
+static int ovl_sdl_init_once(int screen_w, int screen_h) {
 	ovl_load_gl3_procs();
 
 	// Use actual SDL window size if available (plugin may report render
@@ -385,6 +387,15 @@ static void ovl_sdl_destroy(void) {
 		glDeleteTextures(1, &s_overlayTexture);
 		s_overlayTexture = 0;
 	}
+}
+
+// The frontend retries a failed init every frame: free what an earlier attempt left and what a failed one made
+static int ovl_sdl_init(int screen_w, int screen_h) {
+	ovl_sdl_destroy();
+	int r = ovl_sdl_init_once(screen_w, screen_h);
+	if (r != 0)
+		ovl_sdl_destroy();
+	return r;
 }
 
 // ---------------------------------------------------------------------------

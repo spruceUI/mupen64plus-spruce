@@ -45,6 +45,9 @@ static EmuOvlConfig s_overlayConfig;
 static bool s_overlayInitialized = false;
 static bool s_overlayConfigLoaded = false;
 static bool s_overlayConfigFailed = false;
+// GL init is retried per frame until the context is ready; past this many failures the overlay stays off
+#define OVERLAY_MAX_INIT_TRIES 30
+static int s_overlayInitTries = 0;
 static char s_overlayJsonPath[512] = "";
 static char s_overlayIniPath[512] = "";
 static Uint8 s_prevHat = 0;
@@ -1179,8 +1182,14 @@ static void overlay_ensure_init(int w, int h) {
 
 	s_pluginOps.exec_on_video_thread(overlay_init_on_gl_thread, &ctx);
 
-	if (ctx.result != 0)
-		return; // GL not ready yet, will retry next frame
+	if (ctx.result != 0) {
+		// GL not ready yet: retry next frame, but not forever
+		if (++s_overlayInitTries >= OVERLAY_MAX_INIT_TRIES) {
+			fprintf(stderr, "[Overlay] GL init failed %d times; overlay off for this session\n", s_overlayInitTries);
+			s_overlayConfigFailed = true;
+		}
+		return;
+	}
 
 	s_overlayInitialized = true;
 
