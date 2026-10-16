@@ -3,7 +3,8 @@
 Patch GLideN64 to integrate the SpruceOS overlay menu.
 
 Adds overlay source files to CMakeLists.txt, resolves core API functions,
-and calls emu_frontend_init/frame from DisplayWindow::swapBuffers().
+and calls emu_frontend_init/frame from DisplayWindow::swapBuffers(). With
+ThreadedVideo the overlay's GL work runs on GLideN64's GL thread (section 4).
 """
 
 import os
@@ -125,10 +126,12 @@ extern "C" {
 #include "emu_overlay_render.h"
 extern EmuOvlRenderBackend* overlay_sdl_get_backend(void);
 }
+#include <Graphics/OpenGLContext/ThreadedOpenGl/opengl_Wrapper.h>
 
-/* Plugin ops callbacks for the overlay (C-compatible function pointers) */
+/* Plugin ops callbacks for the overlay (C-compatible function pointers). With ThreadedVideo the GL context
+ * lives on GLideN64's command thread, so the overlay's swaps and GL work go through FunctionWrapper. */
 static void gliden64_swap_buffers(void) {
-    CoreVideo_GL_SwapBuffers();
+    opengl::FunctionWrapper::CoreVideo_GL_SwapBuffers();
 }
 
 static void gliden64_cycle_aspect(void) {
@@ -140,11 +143,13 @@ static EmuOvlRenderBackend* gliden64_get_render(void) {
 }
 
 static void gliden64_exec_on_video_thread(void (*fn)(void* ctx), void* ctx) {
-    fn(ctx);
+    opengl::FunctionWrapper::wrSpruceOverlayCall(fn, ctx);
 }
 ''',
     1
 )
+if "wrSpruceOverlayCall(fn, ctx)" not in src:
+    raise SystemExit("overlay_gliden64.py: MupenPlusAPIImpl.cpp anchor not found; refusing to build without the overlay dispatch")
 
 # Add overlay init after the CoreVideo dlsym block
 # Find a reliable anchor point near the end of PluginStartup's dlsym calls
@@ -174,3 +179,72 @@ src = src.replace(
 with open(API_PATH, "w") as f:
     f.write(src)
 print("Patched GLideN64 MupenPlusAPIImpl.cpp")
+
+# ============================================================
+# 4. Patch the threaded GL wrapper: run overlay callbacks on the GL thread
+# ============================================================
+# With ThreadedVideo the context is current only on FunctionWrapper's command thread; the overlay's GL init
+# failed elsewhere and was retried every frame (2026-10-15: ~150 MB/s until the OOM killer).
+TOGL = "video-gliden64/src/Graphics/OpenGLContext/ThreadedOpenGl/"
+
+
+def patch_once(path, anchor, replacement):
+    with open(path, "r") as f:
+        text = f.read()
+    if text.count(anchor) != 1:
+        raise SystemExit(f"overlay_gliden64.py: anchor not found once in {path}: {anchor!r}")
+    with open(path, "w") as f:
+        f.write(text.replace(anchor, replacement, 1))
+
+
+patch_once(TOGL + "opengl_WrappedFunctions.h", "class GlGetIntegervCommand : public OpenGlCommand", '''/* SpruceOS overlay: one overlay callback, run on the GL thread (synced, like the glGet* commands) */
+class SpruceOverlayCallCommand : public OpenGlCommand
+{
+public:
+	SpruceOverlayCallCommand() :
+		OpenGlCommand(true, false, "spruceOverlayCall")
+	{
+	}
+
+	static std::shared_ptr<OpenGlCommand> get(void (*fn)(void*), void* ctx)
+	{
+		static int poolId = OpenGlCommandPool::get().getNextAvailablePool();
+		auto ptr = getFromPool<SpruceOverlayCallCommand>(poolId);
+		ptr->set(fn, ctx);
+		return ptr;
+	}
+
+	void commandToExecute() override
+	{
+		m_fn(m_ctx);
+	}
+
+private:
+	void set(void (*fn)(void*), void* ctx)
+	{
+		m_fn = fn;
+		m_ctx = ctx;
+	}
+
+	void (*m_fn)(void*) = nullptr;
+	void* m_ctx = nullptr;
+};
+
+class GlGetIntegervCommand : public OpenGlCommand''')
+
+patch_once(TOGL + "opengl_Wrapper.h", "\t\tstatic void CoreVideo_GL_SwapBuffers();",
+           "\t\tstatic void CoreVideo_GL_SwapBuffers();\n"
+           "\t\t/* SpruceOS overlay: fn(ctx) on the GL thread (threaded) or here (not threaded) */\n"
+           "\t\tstatic void wrSpruceOverlayCall(void (*fn)(void*), void* ctx);")
+
+patch_once(TOGL + "opengl_Wrapper.cpp", "\tvoid FunctionWrapper::setThreadedMode(u32 _threaded)",
+           "\tvoid FunctionWrapper::wrSpruceOverlayCall(void (*fn)(void*), void* ctx)\n"
+           "\t{\n"
+           "\t\tif (m_threaded_wrapper)\n"
+           "\t\t\texecuteCommand(SpruceOverlayCallCommand::get(fn, ctx));\n"
+           "\t\telse\n"
+           "\t\t\tfn(ctx);\n"
+           "\t}\n"
+           "\n"
+           "\tvoid FunctionWrapper::setThreadedMode(u32 _threaded)")
+print("Patched GLideN64 threaded wrapper (SpruceOverlayCallCommand)")

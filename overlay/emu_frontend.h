@@ -27,8 +27,8 @@ typedef struct {
 	EmuOvlRenderBackend* (*get_render)(void);
 
 	// Dispatch `fn(ctx)` on the video/GL thread (blocking). For non-threaded
-	// plugins, this can just call `fn(ctx)` directly. GLideN64 uses its
-	// OverlayCallbackCommand + executeOverlayCommand path.
+	// plugins, this can just call `fn(ctx)` directly. GLideN64 uses
+	// FunctionWrapper::wrSpruceOverlayCall (patches/universal/overlay_gliden64.py).
 	void (*exec_on_video_thread)(void (*fn)(void* ctx), void* ctx);
 } EmuFrontendPluginOps;
 
