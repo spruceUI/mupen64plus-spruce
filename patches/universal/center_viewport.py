@@ -2,6 +2,13 @@
 """
 Patch all video plugins to offset glViewport/glScissor X by M64P_VIEWPORT_X.
 Centers 4:3 content on widescreen displays (TSP/TSPS 1280x720).
+
+M64P_VIEWPORT_Y does the same vertically, for panels taller than 4:3 (GKD 350H Ultra
+1600x1440): the plugins draw their 4:3 canvas at the bottom of the screen otherwise.
+Rice and Glide64mk2 each already carry one vertical offset for their on-screen drawing
+(Rice: windowSetting.statusBarHeightToUse, its windowed-mode status bar height;
+Glide64mk2: viewport_offset, set to 0 at init), so M64P_VIEWPORT_Y is set there. Unset or 0:
+unchanged.
 """
 
 import os
@@ -11,6 +18,15 @@ def get_vp_offset_helper():
 static int _vp_offset(void) {
     static int off = -1;
     if (off == -1) { const char *e = getenv("M64P_VIEWPORT_X"); off = e ? atoi(e) : 0; }
+    return off;
+}
+'''
+
+def get_vp_offset_y_helper():
+    return '''
+static int _vp_offset_y(void) {
+    static int off = -1;
+    if (off == -1) { const char *e = getenv("M64P_VIEWPORT_Y"); off = e ? atoi(e) : 0; if (off < 0) off = 0; }
     return off;
 }
 '''
@@ -49,6 +65,30 @@ src = src.replace(
 
 with open(RICE_PATH, "w") as f:
     f.write(src)
+
+# Vertical: Rice adds windowSetting.statusBarHeightToUse to the y of every on-screen
+# viewport and scissor. Fullscreen sets it to 0 (Initialize, SetFullscreenMode) and windowed
+# to statusBarHeight (Initialize, SetWindowMode), and Initialize ends with SetWindowMode(), so
+# the windowed value is the one that holds: the offset goes on every assignment.
+RICE_CTX_PATH = "video-rice/projects/unix/../../src/OGLGraphicsContext.cpp"
+
+with open(RICE_CTX_PATH, "r") as f:
+    src = f.read()
+
+src = src.replace(
+    '#include "OGLGraphicsContext.h"',
+    '#include "OGLGraphicsContext.h"\n#include <stdlib.h>\n' + get_vp_offset_y_helper(),
+    1
+)
+assert src.count('windowSetting.statusBarHeightToUse = 0;') == 2
+src = src.replace('windowSetting.statusBarHeightToUse = 0;',
+                  'windowSetting.statusBarHeightToUse = _vp_offset_y();')
+assert src.count('windowSetting.statusBarHeightToUse = windowSetting.statusBarHeight;') == 2
+src = src.replace('windowSetting.statusBarHeightToUse = windowSetting.statusBarHeight;',
+                  'windowSetting.statusBarHeightToUse = windowSetting.statusBarHeight + _vp_offset_y();')
+
+with open(RICE_CTX_PATH, "w") as f:
+    f.write(src)
 print("Patched Rice")
 
 # ============================================================
@@ -62,9 +102,14 @@ with open(GLIDE_PATH, "r") as f:
 # Add offset helper after includes
 src = src.replace(
     '#include "glitchmain.h"',
-    '#include "glitchmain.h"\n#include <stdlib.h>\n' + get_vp_offset_helper(),
+    '#include "glitchmain.h"\n#include <stdlib.h>\n' + get_vp_offset_helper() + get_vp_offset_y_helper(),
     1
 )
+
+# Vertical: every on-screen viewport, scissor, pixel read and copy adds viewport_offset,
+# which init sets to 0 (off-screen framebuffers use 0 directly)
+assert src.count('viewport_offset = 0; //-10 //-20;') == 1
+src = src.replace('viewport_offset = 0; //-10 //-20;', 'viewport_offset = _vp_offset_y();')
 
 # Offset all glViewport X args (first arg is always 0 or an expression)
 src = src.replace('glViewport(0, viewport_offset', 'glViewport(_vp_offset(), viewport_offset')

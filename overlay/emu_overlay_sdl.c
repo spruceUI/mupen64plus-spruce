@@ -62,6 +62,8 @@ static int s_scale = 2;
 
 static int s_screenW = 0;
 static int s_screenH = 0;
+// Where the game canvas sits on panels taller than 4:3 (M64P_VIEWPORT_Y, as the video plugins)
+static int s_viewportY = 0;
 
 static TTF_Font* s_fonts[EMU_OVL_FONT_COUNT] = {NULL, NULL, NULL, NULL}; // LARGE, MEDIUM, SMALL, TINY
 
@@ -192,6 +194,12 @@ static int ovl_sdl_init(int screen_w, int screen_h) {
 
 	s_screenW = screen_w;
 	s_screenH = screen_h;
+	{
+		const char* vp_y = getenv("M64P_VIEWPORT_Y");
+		s_viewportY = vp_y ? atoi(vp_y) : 0;
+		if (s_viewportY < 0)
+			s_viewportY = 0;
+	}
 
 	// Scale factor: match NextUI's FIXED_SCALE
 	// Brick (1024x768) = 3x, Smart Pro / TG5050 (1280x720) = 2x,
@@ -404,7 +412,7 @@ static void ovl_sdl_capture_frame(void) {
 	if (!gl_pixels)
 		return;
 
-	glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, gl_pixels);
+	glReadPixels(0, s_viewportY, w, h, GL_RGBA, GL_UNSIGNED_BYTE, gl_pixels);
 
 	// Copy into capture surface, flipping vertically and converting RGBA -> ARGB
 	SDL_LockSurface(s_captureSurface);
@@ -768,7 +776,7 @@ static void ovl_sdl_end_frame(void) {
 	SDL_UnlockSurface(s_renderSurface);
 
 	// Set overlay GL state
-	glViewport(0, 0, s_screenW, s_screenH);
+	glViewport(0, s_viewportY, s_screenW, s_screenH);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_SCISSOR_TEST);
