@@ -6,7 +6,7 @@ Centers 4:3 content on widescreen displays (TSP/TSPS 1280x720).
 M64P_VIEWPORT_Y does the same vertically, for panels taller than 4:3 (GKD 350H Ultra
 1600x1440): the plugins draw their 4:3 canvas at the bottom of the screen otherwise.
 Rice and Glide64mk2 each already carry one vertical offset for their on-screen drawing
-(Rice: windowSetting.statusBarHeightToUse, a windowed-mode leftover that fullscreen sets to 0;
+(Rice: windowSetting.statusBarHeightToUse, its windowed-mode status bar height;
 Glide64mk2: viewport_offset, set to 0 at init), so M64P_VIEWPORT_Y is set there. Unset or 0:
 unchanged.
 """
@@ -67,7 +67,9 @@ with open(RICE_PATH, "w") as f:
     f.write(src)
 
 # Vertical: Rice adds windowSetting.statusBarHeightToUse to the y of every on-screen
-# viewport and scissor; fullscreen sets it to 0 (Initialize and SetFullscreenMode).
+# viewport and scissor. Fullscreen sets it to 0 (Initialize, SetFullscreenMode) and windowed
+# to statusBarHeight (Initialize, SetWindowMode), and Initialize ends with SetWindowMode(), so
+# the windowed value is the one that holds: the offset goes on every assignment.
 RICE_CTX_PATH = "video-rice/projects/unix/../../src/OGLGraphicsContext.cpp"
 
 with open(RICE_CTX_PATH, "r") as f:
@@ -81,6 +83,9 @@ src = src.replace(
 assert src.count('windowSetting.statusBarHeightToUse = 0;') == 2
 src = src.replace('windowSetting.statusBarHeightToUse = 0;',
                   'windowSetting.statusBarHeightToUse = _vp_offset_y();')
+assert src.count('windowSetting.statusBarHeightToUse = windowSetting.statusBarHeight;') == 2
+src = src.replace('windowSetting.statusBarHeightToUse = windowSetting.statusBarHeight;',
+                  'windowSetting.statusBarHeightToUse = windowSetting.statusBarHeight + _vp_offset_y();')
 
 with open(RICE_CTX_PATH, "w") as f:
     f.write(src)
